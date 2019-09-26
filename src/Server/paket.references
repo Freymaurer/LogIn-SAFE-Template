@@ -1,5 +1,4 @@
-Fable.Elmish.Browser
 group Server
     FSharp.Core
-    Suave
-    Fable.Remoting.Suave
+    Saturn
+    Fable.Remoting.Giraffe

@@ -1,14 +1,11 @@
-source https://www.nuget.org/api/v2
-
-nuget Fable.Elmish.Browser
 group Server
     source https://api.nuget.org/v3/index.json
     framework: netcoreapp2.2
     storage: none
 
     nuget FSharp.Core
-    nuget Suave
-    nuget Fable.Remoting.Suave ~> 3
+    nuget Saturn
+    nuget Fable.Remoting.Giraffe ~> 3
 
 group Client
     source https://api.nuget.org/v3/index.json
@@ -35,3 +32,4 @@ group Build
     nuget Fake.Core.Target
     nuget Fake.DotNet.Cli
     nuget Fake.IO.FileSystem
+

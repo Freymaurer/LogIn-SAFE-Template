@@ -1,4 +1,4 @@
-// Template for webpack.config.js in Fable projects
+﻿// Template for webpack.config.js in Fable projects
 // Find latest version in https://github.com/fable-compiler/webpack-config-template
 
 // In most cases, you'll only need to edit the CONFIG object (after dependencies)
@@ -78,8 +78,7 @@ module.exports = {
     // to prevent browser caching if code changes
     output: {
         path: resolve(CONFIG.outputDir),
-        filename: isProduction ? '[name].[hash].js' : '[name].js',
-        publicPath: '/'
+        filename: isProduction ? '[name].[hash].js' : '[name].js'
     },
     mode: isProduction ? 'production' : 'development',
     devtool: isProduction ? 'source-map' : 'eval-source-map',
@@ -110,7 +109,6 @@ module.exports = {
     // Configuration for webpack-dev-server
     devServer: {
         publicPath: '/',
-        historyApiFallback : true,
         contentBase: resolve(CONFIG.assetsDir),
         host: '0.0.0.0',
         port: CONFIG.devServerPort,

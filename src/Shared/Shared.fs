@@ -12,3 +12,5 @@ module Route =
 type ICounterApi =
     { initialCounter : unit -> Async<Counter> }
 
+type ISecuredApi =
+    { securedCounter : unit -> Async<Counter> }
