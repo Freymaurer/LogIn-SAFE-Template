@@ -1,5 +1,7 @@
 module Client
 
+open System
+
 open Elmish
 open Elmish.React
 open Fable.React
@@ -16,6 +18,8 @@ open Shared
 type Model = {
     Counter: Counter option
     ErrorMsg : string option
+    User : User
+    Token : TokenResult option
     }
 
 // The Msg type defines what events/actions can occur while the application is running
@@ -26,6 +30,12 @@ type Msg =
     | InitialCountLoaded of Counter
     | GetSecuredCounterRequest
     | GetSecuredCounterResponse of Result<Counter, exn>
+    | UpdateUser of User
+    | GetTokenRequest of User
+    | GetTokenResponse of Result<TokenResult, exn>
+    | GetTestRequest of string
+    | GetTestResponse of Result<string, exn>
+    | DeleteToken
 
 module ServerPath =
     open System
@@ -67,20 +77,43 @@ module Server =
       |> Remoting.withRouteBuilder normalizeRoutes
       |> Remoting.buildProxy<ICounterApi>
 
-    let securedApi : ISecuredApi =
+    let securedApi header : ISecuredApi =
       Remoting.createApi()
       |> Remoting.withRouteBuilder normalizeRoutes
+      |> Remoting.withAuthorizationHeader header
       |> Remoting.buildProxy<ISecuredApi>
-
-
 
 let initialCounter = Server.userApi.initialCounter
 
+let myDecode64 (str64:string) =
+    let l = str64.Length
+    let padNum = l%4
+    let padding = if padNum = 0 then "" else Array.init (4-padNum) (fun _ -> "=") |> String.concat ""
+    let newStr = str64 + padding
+    let toByteArr = System.Convert.FromBase64String(newStr)
+    System.Text.Encoding.UTF8.GetString (toByteArr)
+
 // defines the initial state and initial command (= side-effect) of the application
 let init () : Model * Cmd<Msg> =
+    let checkCookies =
+        let cookieStrArr =
+            Browser.Dom.document.cookie
+            |> fun x -> x.Split([|';'|])
+        cookieStrArr
+        |> Array.tryFindIndex (fun x -> x.StartsWith "testCookieSignUp=")
+        |> fun x -> if x.IsSome then cookieStrArr.[x.Value].Replace("testCookieSignUp=","") else ""
+    let user =
+        if checkCookies <> ""
+        then
+            checkCookies.Split([|'.'|]).[1]
+            |> myDecode64
+            |> fun x -> x.Split([|'"';':';|],StringSplitOptions.RemoveEmptyEntries).[2]
+        else""
     let initialModel = {
         Counter = None
         ErrorMsg = None
+        User = {Username = user; Password = ""}
+        Token = Some { Token = checkCookies }
     }
     let loadCountCmd =
         Cmd.OfAsync.perform initialCounter () InitialCountLoaded
@@ -101,9 +134,11 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
         let nextModel = { currentModel with Counter = Some initialCount }
         nextModel, Cmd.none
     | Some _ , GetSecuredCounterRequest ->
+        let authorizationToken =
+            if currentModel.Token.IsSome then "Bearer " + currentModel.Token.Value.Token else "no token given"
         let requestCmd =
             Cmd.OfAsync.either
-                Server.securedApi.securedCounter
+                (Server.securedApi authorizationToken).securedCounter 
                 ()
                 (Ok >> GetSecuredCounterResponse)
                 (Error >> GetSecuredCounterResponse)
@@ -125,6 +160,60 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
                 Counter = Some value
         }
         nextModel, Cmd.none
+    | _ , UpdateUser (user:User) ->
+        let nextModel = {
+            currentModel with
+                User = user
+        }
+        nextModel, Cmd.none
+    | _ , GetTokenRequest (user:User) ->
+        let cmdRequest =
+            Cmd.OfAsync.either
+                Server.userApi.getToken
+                (user)
+                (Ok >> GetTokenResponse)
+                (Error >> GetTokenResponse)
+        currentModel, cmdRequest
+    | _ , GetTokenResponse (Error e) ->
+        let nextModel = {
+            currentModel with
+                ErrorMsg = Some e.Message
+        }
+        nextModel,Cmd.none
+    | _ , GetTokenResponse (Ok value) ->
+        let exp = DateTime.UtcNow.AddHours(1.0).ToUniversalTime().ToString("ddd, dd MMM yyyy HH':'mm':'ss 'GMT'")
+        Browser.Dom.document.cookie <-(sprintf "testCookieSignUp=%s;expires=%s" value.Token exp)
+        let nextModel = {
+            currentModel with
+                Token = Some value
+        }
+        nextModel, Cmd.none
+    | _ , GetTestRequest (tokenStr) ->
+        let requestCmd =
+            Cmd.OfAsync.either
+                Server.userApi.getTest
+                (tokenStr)
+                (Ok >> GetTestResponse)
+                (Error >> GetTestResponse)
+        currentModel, requestCmd
+    | _, GetTestResponse (Ok value) ->
+        let nextModel = {
+            currentModel with
+                ErrorMsg = Some value
+        }
+        nextModel,Cmd.none
+    | _, GetTestResponse (Error e) ->
+        let nextModel = {
+            currentModel with
+                ErrorMsg = Some e.Message
+        }
+        nextModel,Cmd.none
+    | _, DeleteToken ->
+        let nextModel = {
+            currentModel with
+                Token = None
+        }
+        nextModel,Cmd.none
     | _ -> currentModel, Cmd.none
 
 
@@ -171,13 +260,65 @@ let button txt onClick =
           Button.OnClick onClick ]
         [ str txt ]
 
+let loginNavbar (model : Model) (dispatch : Msg -> unit)=
+    [ Navbar.Item.div
+        [ ]
+        [ Heading.h2 [ ]
+            [ str "SAFE Template" ] ]
+      Navbar.Item.div
+        [ ]
+        [ Input.text
+            [ Input.OnChange (
+                fun e ->
+                    let newUser = { model.User with Username = e.Value}
+                    dispatch (UpdateUser newUser)
+                )
+              Input.Placeholder "Username"
+                ]
+        ]
+      Navbar.Item.div
+        [ ]
+        [ Input.password
+            [ Input.OnChange (
+                fun e ->
+                    let newUser = { model.User with Password = e.Value}
+                    dispatch (UpdateUser newUser)
+                )
+              Input.Placeholder "Password"
+                ]
+        ]
+      Navbar.Item.div
+        [ ]
+        [ Button.a
+            [ Button.OnClick (fun _ -> dispatch (GetTokenRequest model.User) ) ]
+            [ str "Login" ]
+        ]
+    ]
+
+let loggedInNavbar (model : Model) (dispatch : Msg -> unit) =
+    [ Navbar.Item.div
+        [ ]
+        [ Heading.h2 [ ]
+            [ str "SAFE Template" ] ]
+      Navbar.Item.div
+        [ ]
+        [ Box.box'
+            [ GenericOption.Props [ Style [ Padding "1rem" ] ] ]
+            [ str model.User.Username ]
+        ]
+      Navbar.Item.div
+        [ ]
+        [ Button.a
+            [ Button.OnClick ( fun _ -> dispatch DeleteToken)]
+            [ str "logout" ]
+        ]
+    ]
+
 let view (model : Model) (dispatch : Msg -> unit) =
     div []
         [ Navbar.navbar [ Navbar.Color IsPrimary ]
-            [ Navbar.Item.div [ ]
-                [ Heading.h2 [ ]
-                    [ str "SAFE Template" ] ] ]
-
+            (if model.Token.IsSome then (loggedInNavbar model dispatch) else (loginNavbar model dispatch ))
+          br []
           Container.container []
               [ Content.content [ Content.Modifiers [ Modifier.TextAlignment (Screen.All, TextAlignment.Centered) ] ]
                     [ Heading.h3 [] [ str ("Press buttons to manipulate counter: " + show model) ] ]
@@ -185,7 +326,19 @@ let view (model : Model) (dispatch : Msg -> unit) =
                     [ Column.column [] [ button "-" (fun _ -> dispatch Decrement) ]
                       Column.column [] [ button "+" (fun _ -> dispatch Increment) ]
                       Column.column [] [ button "secret" (fun _ -> dispatch GetSecuredCounterRequest) ] ] ]
-
+          str (model.User.Username)
+          br []
+          str (model.User.Password)
+          br []
+          str (if model.Token.IsSome then model.Token.Value.Token else "")
+          
+          Box.box'
+            [ ]
+            [ Button.button
+                [ Button.OnClick (fun _ -> dispatch (GetTestRequest model.Token.Value.Token)) ]
+                [str "test token"]
+            ]
+          str Browser.Dom.document.cookie
           Footer.footer [ ]
                 [ Content.content [ Content.Modifiers [ Modifier.TextAlignment (Screen.All, TextAlignment.Centered) ] ]
                     [ safeComponents
