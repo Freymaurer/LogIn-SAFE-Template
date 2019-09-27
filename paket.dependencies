@@ -1,6 +1,9 @@
+source https://www.nuget.org/api/v2
+
+nuget Microsoft.AspNetCore.Authentication.JwtBearer 3.0.0
 group Server
     source https://api.nuget.org/v3/index.json
-    framework: netcoreapp2.2
+    framework: netcoreapp3.0
     storage: none
 
     nuget FSharp.Core
@@ -32,4 +35,3 @@ group Build
     nuget Fake.Core.Target
     nuget Fake.DotNet.Cli
     nuget Fake.IO.FileSystem
-

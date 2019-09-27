@@ -13,7 +13,10 @@ open Shared
 // in this case, we are keeping track of a counter
 // we mark it as optional, because initially it will not be available from the client
 // the initial value will be requested from server
-type Model = { Counter: Counter option }
+type Model = {
+    Counter: Counter option
+    ErrorMsg : string option
+    }
 
 // The Msg type defines what events/actions can occur while the application is running
 // the state of the application changes *only* in reaction to these events
@@ -21,6 +24,9 @@ type Msg =
     | Increment
     | Decrement
     | InitialCountLoaded of Counter
+    | GetSecuredCounterRequest
+    | GetSecuredCounterResponse of Result<Counter, exn>
+
 module ServerPath =
     open System
     open Fable.Core
@@ -56,15 +62,26 @@ module Server =
         |> ServerPath.normalize
 
     /// A proxy you can use to talk to server directly
-    let api : ICounterApi =
+    let userApi : ICounterApi =
       Remoting.createApi()
       |> Remoting.withRouteBuilder normalizeRoutes
       |> Remoting.buildProxy<ICounterApi>
-let initialCounter = Server.api.initialCounter
+
+    let securedApi : ISecuredApi =
+      Remoting.createApi()
+      |> Remoting.withRouteBuilder normalizeRoutes
+      |> Remoting.buildProxy<ISecuredApi>
+
+
+
+let initialCounter = Server.userApi.initialCounter
 
 // defines the initial state and initial command (= side-effect) of the application
 let init () : Model * Cmd<Msg> =
-    let initialModel = { Counter = None }
+    let initialModel = {
+        Counter = None
+        ErrorMsg = None
+    }
     let loadCountCmd =
         Cmd.OfAsync.perform initialCounter () InitialCountLoaded
     initialModel, loadCountCmd
@@ -81,7 +98,32 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
         let nextModel = { currentModel with Counter = Some { Value = counter.Value - 1 } }
         nextModel, Cmd.none
     | _, InitialCountLoaded initialCount->
-        let nextModel = { Counter = Some initialCount }
+        let nextModel = { currentModel with Counter = Some initialCount }
+        nextModel, Cmd.none
+    | Some _ , GetSecuredCounterRequest ->
+        let requestCmd =
+            Cmd.OfAsync.either
+                Server.securedApi.securedCounter
+                ()
+                (Ok >> GetSecuredCounterResponse)
+                (Error >> GetSecuredCounterResponse)
+        let nextModel = {
+            currentModel with Counter = None
+            }
+        nextModel, requestCmd
+    | _ , GetSecuredCounterResponse (Error e) ->
+        let nextModel = {
+            currentModel with
+                ErrorMsg = Some e.Message
+        }
+        let loadCountCmd =
+            Cmd.OfAsync.perform initialCounter () InitialCountLoaded
+        nextModel, loadCountCmd
+    | _ , GetSecuredCounterResponse (Ok value) ->
+        let nextModel = {
+            currentModel with
+                Counter = Some value
+        }
         nextModel, Cmd.none
     | _ -> currentModel, Cmd.none
 
@@ -111,7 +153,14 @@ let safeComponents =
           str " powered by: "
           components ]
 
-let show = function
+let debug (m:Model) =
+    match m with
+    | { ErrorMsg = Some value } -> string m.ErrorMsg
+    | { ErrorMsg = None } -> ""
+
+
+let show model =
+    match model with
     | { Counter = Some counter } -> string counter.Value
     | { Counter = None   } -> "Loading..."
 
@@ -134,11 +183,14 @@ let view (model : Model) (dispatch : Msg -> unit) =
                     [ Heading.h3 [] [ str ("Press buttons to manipulate counter: " + show model) ] ]
                 Columns.columns []
                     [ Column.column [] [ button "-" (fun _ -> dispatch Decrement) ]
-                      Column.column [] [ button "+" (fun _ -> dispatch Increment) ] ] ]
+                      Column.column [] [ button "+" (fun _ -> dispatch Increment) ]
+                      Column.column [] [ button "secret" (fun _ -> dispatch GetSecuredCounterRequest) ] ] ]
 
           Footer.footer [ ]
                 [ Content.content [ Content.Modifiers [ Modifier.TextAlignment (Screen.All, TextAlignment.Centered) ] ]
-                    [ safeComponents ] ] ]
+                    [ safeComponents
+                      br []
+                      str (debug model) ] ] ]
 
 #if DEBUG
 open Elmish.Debug
