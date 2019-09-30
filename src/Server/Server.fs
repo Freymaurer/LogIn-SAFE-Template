@@ -16,6 +16,7 @@ open System.IdentityModel.Tokens.Jwt
 open FSharp.Control.Tasks.V2.ContextInsensitive
 open Microsoft.AspNetCore.Http
 
+
 module MyJWT =
 
     let private createPassPhrase() =
@@ -43,15 +44,60 @@ module MyJWT =
             Claim(JwtRegisteredClaimNames.Sub, username);
             Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()) |]
         claims
-        |> Auth.generateJWT (secret, algorithm) issuer (DateTime.UtcNow.AddHours(1.0))
+        |> Auth.generateJWT (secret, algorithm) issuer (DateTime.UtcNow.AddYears(1))
         |> fun x -> { Token = x }
 
 
 let jwtPayload (token:string) =
-    //System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().ReadJwtToken(token)
-    //|> fun x -> x.Claims |> (Array.ofSeq >> Array.head >> fun x -> x.Value)
-    "empty"
+    let token = System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().ReadJwtToken(token)
+    let claims =
+        token
+        |> fun x -> x.Claims
+    let test =
+        claims |> (Array.ofSeq >> Array.map (fun x -> x.Value) )
+    let test2 =
+        token.Payload.Sub
+    //claims |> (Array.ofSeq >> Array.head >> fun x -> x.Value)
+    //String.concat ";" test2
+    test2
 
+let verifyUser (user:User) =
+    //here could be any user authentification
+    if user.Username = "testUser" && user.Password = "testPw"
+    then Some (MyJWT.generateToken user.Username)
+    else None
+
+let validateToken (tokenStr:string) =
+    let key:string = MyJWT.secret
+    let tokenHandler =
+        new System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler()
+    let securityToken =
+        tokenHandler.ReadToken(tokenStr)
+    let hmac =
+        new Security.Cryptography.HMACSHA256(System.Text.Encoding.ASCII.GetBytes(key))
+    let symKey =
+        new Microsoft.IdentityModel.Tokens.SymmetricSecurityKey(hmac.Key)
+    let symKey2 =
+        key
+        |> fun x -> x.ToCharArray()
+        |> Array.map (fun c -> Byte.Parse(string c) )
+        |> fun x -> new Microsoft.IdentityModel.Tokens.SymmetricSecurityKey(x)
+    let validationParams =
+        new Microsoft.IdentityModel.Tokens.TokenValidationParameters()
+    validationParams.IssuerSigningKey <- symKey2
+    tokenHandler.ValidateToken(tokenStr,validationParams)
+    |> fun x -> fst x
+    |> fun x -> x.ToString()
+    
+
+let getUserFromToken (tokenStr:string option) =
+    if tokenStr.IsSome
+    then 
+        let token = System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().ReadJwtToken(tokenStr.Value)
+        let user =
+            token.Payload.Sub
+        Some user
+    else None
 
 let tryGetEnv = System.Environment.GetEnvironmentVariable >> function null | "" -> None | x -> Some x
 
@@ -62,14 +108,16 @@ let port =
     |> tryGetEnv |> Option.map uint16 |> Option.defaultValue 8085us
 
 let counterApi = {
-    initialCounter = fun () -> async { return { Value = 42 } }
-    getToken = fun (user) -> async { return (MyJWT.generateToken user.Username) }
-    getTest = fun (token) -> async { return jwtPayload token}
+    initialCounter = fun () -> async {return { Value = 42 }}
+    initialLoad = fun (token) -> async { return ((getUserFromToken token),{ Value = 42 }) }
+    getToken = fun (user) -> async { return (verifyUser user) }
+    getTest = fun (token) -> async { return validateToken token(*(getUserFromToken (Some token)).Value*)}
 }
 
 let securedApi = {
     securedCounter = fun () -> async { return { Value = 69 } }
 }
+
 
 // exmp http://localhost:8080/api/ICounterApi/initialCounter
 // exmp http://localhost:8080/api/ISecuredApi/securedCounter

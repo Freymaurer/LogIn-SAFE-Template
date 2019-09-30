@@ -8,7 +8,7 @@ open Fable.React
 open Fable.React.Props
 open Fulma
 open Thoth.Json
-
+open Fable.Core
 open Shared
 
 // The model holds data that you want to keep track of while the application is running
@@ -32,10 +32,10 @@ type Msg =
     | GetSecuredCounterResponse of Result<Counter, exn>
     | UpdateUser of User
     | GetTokenRequest of User
-    | GetTokenResponse of Result<TokenResult, exn>
+    | GetTokenResponse of Result<TokenResult option, exn>
     | GetTestRequest of string
     | GetTestResponse of Result<string, exn>
-    | DeleteToken
+    | LogOut
 
 module ServerPath =
     open System
@@ -83,7 +83,8 @@ module Server =
       |> Remoting.withAuthorizationHeader header
       |> Remoting.buildProxy<ISecuredApi>
 
-let initialCounter = Server.userApi.initialCounter
+let initialCounter =
+    Server.userApi.initialCounter
 
 let myDecode64 (str64:string) =
     let l = str64.Length
@@ -101,11 +102,11 @@ let init () : Model * Cmd<Msg> =
             |> fun x -> x.Split([|';'|])
         cookieStrArr
         |> Array.tryFindIndex (fun x -> x.StartsWith "testCookieSignUp=")
-        |> fun x -> if x.IsSome then cookieStrArr.[x.Value].Replace("testCookieSignUp=","") else ""
+        |> fun x -> if x.IsSome then Some (cookieStrArr.[x.Value].Replace("testCookieSignUp=","")) else None
     let user =
-        if checkCookies <> ""
+        if checkCookies.IsSome
         then
-            checkCookies.Split([|'.'|]).[1]
+            checkCookies.Value.Split([|'.'|]).[1]
             |> myDecode64
             |> fun x -> x.Split([|'"';':';|],StringSplitOptions.RemoveEmptyEntries).[2]
         else""
@@ -113,10 +114,13 @@ let init () : Model * Cmd<Msg> =
         Counter = None
         ErrorMsg = None
         User = {Username = user; Password = ""}
-        Token = Some { Token = checkCookies }
+        Token = if checkCookies.IsNone then None else Some { Token = checkCookies.Value }
     }
     let loadCountCmd =
-        Cmd.OfAsync.perform initialCounter () InitialCountLoaded
+        Cmd.OfAsync.perform
+            initialCounter
+            ()
+            InitialCountLoaded
     initialModel, loadCountCmd
 
 // The update function computes the next state of the application based on the current state and the incoming events/messages
@@ -130,7 +134,7 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
     | Some counter, Decrement ->
         let nextModel = { currentModel with Counter = Some { Value = counter.Value - 1 } }
         nextModel, Cmd.none
-    | _, InitialCountLoaded initialCount->
+    | _, InitialCountLoaded initialCount ->
         let nextModel = { currentModel with Counter = Some initialCount }
         nextModel, Cmd.none
     | Some _ , GetSecuredCounterRequest ->
@@ -181,11 +185,13 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
         }
         nextModel,Cmd.none
     | _ , GetTokenResponse (Ok value) ->
-        let exp = DateTime.UtcNow.AddHours(1.0).ToUniversalTime().ToString("ddd, dd MMM yyyy HH':'mm':'ss 'GMT'")
-        Browser.Dom.document.cookie <-(sprintf "testCookieSignUp=%s;expires=%s" value.Token exp)
+        //let exp = DateTime.UtcNow.AddHours(1.0).ToUniversalTime().ToString("ddd, dd MMM yyyy HH':'mm':'ss 'GMT'")
+        //Browser.Dom.document.cookie <-(sprintf "testCookieSignUp=%s;expires=%s" value.Token exp)
+        let oneYear = 31536000
+        Browser.Dom.document.cookie <- (sprintf "testCookieSignUp=%s;max-age=%i" value.Value.Token oneYear)
         let nextModel = {
             currentModel with
-                Token = Some value
+                Token = value
         }
         nextModel, Cmd.none
     | _ , GetTestRequest (tokenStr) ->
@@ -208,7 +214,8 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
                 ErrorMsg = Some e.Message
         }
         nextModel,Cmd.none
-    | _, DeleteToken ->
+    | _, LogOut ->
+        Browser.Dom.document.cookie <- (sprintf "testCookieSignUp=None;max-age=0" )
         let nextModel = {
             currentModel with
                 Token = None
@@ -309,7 +316,7 @@ let loggedInNavbar (model : Model) (dispatch : Msg -> unit) =
       Navbar.Item.div
         [ ]
         [ Button.a
-            [ Button.OnClick ( fun _ -> dispatch DeleteToken)]
+            [ Button.OnClick ( fun _ -> dispatch LogOut)]
             [ str "logout" ]
         ]
     ]
@@ -326,11 +333,11 @@ let view (model : Model) (dispatch : Msg -> unit) =
                     [ Column.column [] [ button "-" (fun _ -> dispatch Decrement) ]
                       Column.column [] [ button "+" (fun _ -> dispatch Increment) ]
                       Column.column [] [ button "secret" (fun _ -> dispatch GetSecuredCounterRequest) ] ] ]
-          str (model.User.Username)
-          br []
-          str (model.User.Password)
-          br []
-          str (if model.Token.IsSome then model.Token.Value.Token else "")
+          //str (model.User.Username)
+          //br []
+          //str (model.User.Password)
+          //br []
+          //str (if model.Token.IsSome then model.Token.Value.Token else "")
           
           Box.box'
             [ ]
@@ -338,7 +345,9 @@ let view (model : Model) (dispatch : Msg -> unit) =
                 [ Button.OnClick (fun _ -> dispatch (GetTestRequest model.Token.Value.Token)) ]
                 [str "test token"]
             ]
+          br []
           str Browser.Dom.document.cookie
+          br []
           Footer.footer [ ]
                 [ Content.content [ Content.Modifiers [ Modifier.TextAlignment (Screen.All, TextAlignment.Centered) ] ]
                     [ safeComponents

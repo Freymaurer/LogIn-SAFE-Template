@@ -20,9 +20,11 @@ module Route =
 /// to learn more, read the docs at https://zaid-ajaj.github.io/Fable.Remoting/src/basics.html
 type ICounterApi = {
     initialCounter : unit -> Async<Counter>
-    getToken : User -> Async<TokenResult>
+    initialLoad : string option -> Async<string option * Counter>
+    getToken : User -> Async<TokenResult option>
     getTest : string -> Async<string>
     }
 
-type ISecuredApi =
-    { securedCounter : unit -> Async<Counter> }
+type ISecuredApi = {
+    securedCounter : unit -> Async<Counter>
+    }
