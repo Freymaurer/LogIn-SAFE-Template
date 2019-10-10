@@ -40,9 +40,11 @@ type Msg =
     | InitialLoadResponse of Result<string option * Counter,exn>
     | GetSecuredCounterRequest
     | GetSecuredCounterResponse of Result<Counter, exn>
-    | UpdateUser of User
-    | GetTokenRequest of User
-    | GetTokenResponse of Result<LogInResults, exn>
+    | UpdateUsername of string
+    | UpdateUserPw of string
+    | LogInRequest of User
+    | LogInResponse of Result<LogInResults, exn>
+    | Debug of string
     | GetTestRequest of string
     | GetTestResponse of Result<string, exn>
     | LogOut
@@ -209,28 +211,38 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
                 Counter = Some value
         }
         nextModel, Cmd.none
-    | _ , UpdateUser (user:User) ->
+    | _ , UpdateUsername (name:string) ->
         let nextModel = {
             currentModel with
-                User = user
+                User = {currentModel.User with Username = name}
+        }
+        nextModel, Cmd.none
+    | _ , UpdateUserPw (pw:string) ->
+        let nextModel = {
+            currentModel with
+                User = {currentModel.User with Password = pw}
         }
         nextModel, Cmd.none
         // verify user and return token to model and cookies
-    | _ , GetTokenRequest (user:User) ->
+    | _ , LogInRequest (user:User) ->
+        //let checkName =
+        //    let input = Browser.Dom.document.getElementById "UserName"
+        //    input.innerHTML
+        //    if user.Username <>  
         let cmdRequest =
             Cmd.OfAsync.either
                 Server.userApi.logIn
                 (user)
-                (Ok >> GetTokenResponse)
-                (Error >> GetTokenResponse)
+                (Ok >> LogInResponse)
+                (Error >> LogInResponse)
         currentModel, cmdRequest
-    | _ , GetTokenResponse (Error e) ->
+    | _ , LogInResponse (Error e) ->
         let nextModel = {
             currentModel with
                 ErrorMsg = Some e.Message
         }
         nextModel,Cmd.none
-    | _ , GetTokenResponse (Ok value) ->
+    | _ , LogInResponse (Ok value) ->
         let nextModel =
             match value with
             | LogInResults.InvalidPasswordUser ->
@@ -253,6 +265,8 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
                 ()
                 InitialCountLoaded
         nextModel, cmd
+    | _, Debug (message) ->
+        { currentModel with ErrorMsg = Some message}, Cmd.none
     | _ -> currentModel, Cmd.none
 
 let safeComponents =
@@ -303,17 +317,18 @@ let loginNavbar (model : Model) (dispatch : Msg -> unit)=
         [ Heading.h2 [ ]
             [ str "SAFE Template - Login" ] ]
       Navbar.End.a
-        [ Props [ onEnter (GetTokenRequest model.User) dispatch ] ]
+        [ Props [ onEnter (LogInRequest model.User) dispatch ] ]
         [
             Navbar.Item.div
               [ ]
               [ Input.text
                   [ Input.OnChange (
                       fun e ->
-                          let newUser = { model.User with Username = e.Value}
-                          dispatch (UpdateUser newUser)
+                          //let newUser = { model.User with Username = e.Value}
+                          dispatch (UpdateUsername e.Value)
                       )
                     Input.Placeholder "Username"
+                    Input.Props [ Id "UserName" ]
                       ]
               ]
             Navbar.Item.div
@@ -321,16 +336,17 @@ let loginNavbar (model : Model) (dispatch : Msg -> unit)=
               [ Input.password
                   [ Input.OnChange (
                       fun e ->
-                          let newUser = { model.User with Password = e.Value}
-                          dispatch (UpdateUser newUser)
+                          //let newUser = { model.User with Password = e.Value}
+                          dispatch (UpdateUserPw e.Value)
                       )
                     Input.Placeholder "Password"
+                    Input.Props [ Id "UserPw" ]
                       ]
               ]
             Navbar.Item.div
               [ ]
               [ Button.a
-                  [ Button.OnClick (fun _ -> dispatch (GetTokenRequest model.User) ) ]
+                  [ Button.OnClick (fun _ -> dispatch (LogInRequest model.User) ) ]
                   [ str "Login" ]
               ]
         ]
