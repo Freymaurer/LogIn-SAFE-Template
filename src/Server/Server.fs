@@ -13,10 +13,7 @@ type UserInfo =
     { Username : string
       Claims : string [] }
 
-
-
 module MyJWT =
-
 
     // Do not have this in the repo, save this in an extra file, which will not be pushed anywhere and is only saved locally!
     let passPhrase = @"d38mQ!91*D9PW$dwHQsB%f3Q^Dsz@M7VDuqZvDWU!%U5nPl7BV![#x{/7.N?X^b]GfpYSrL_:~NB[MA~WVSmnX&9V."
@@ -38,7 +35,6 @@ let verifyUser (user:User) =
     if user.Username = "test" && user.Password = "test"
     then LogInResults.Success (MyJWT.generateToken user.Username)
     else LogInResults.InvalidPasswordUser
-
 
 ///// Can use this to readk Jwt token and extract information in payload!
 //let jwtPayload (token:string) =
@@ -84,7 +80,7 @@ let validateToken (tokenStr:string) =
 
 let getUserFromToken (tokenStr:string) =
     if validateToken tokenStr = true
-    then 
+    then
         let token = System.IdentityModel.Tokens.Jwt.JwtSecurityTokenHandler().ReadJwtToken(tokenStr)
         let user =
             token.Payload.Sub
@@ -114,7 +110,6 @@ let securedApi = {
     securedCounter = fun () -> async { return (nice()) }
 }
 
-
 // exmp http://localhost:8080/api/ICounterApi/initialCounter
 // exmp http://localhost:8080/api/ISecuredApi/securedCounter
 let webApp =
@@ -126,7 +121,7 @@ let webApp =
         |> Remoting.withDiagnosticsLogger (printfn "%s")
         |> Remoting.buildHttpHandler
 
-    let securedApi =  
+    let securedApi =
 
         let routes =
             Remoting.createApi()
@@ -145,7 +140,6 @@ let webApp =
         forward "" userApi
         forward "" securedApi
     }
-
 
 let app = application {
     use_jwt_authentication MyJWT.passPhrase MyJWT.issuer

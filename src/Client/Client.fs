@@ -27,7 +27,7 @@ type Model = {
     ErrorMsg : string option
     User : User
     Token : TokenResult option
-    Loading : bool 
+    Loading : bool
     }
 
 // The Msg type defines what events/actions can occur while the application is running
@@ -93,7 +93,6 @@ module Server =
       |> Remoting.withAuthorizationHeader header
       |> Remoting.buildProxy<ISecuredApi>
 
-
 let myDecode64 (str64:string) =
     let l = str64.Length
     let padNum = l%4
@@ -126,7 +125,7 @@ let init () : Model * Cmd<Msg> =
                 (checkCookies.Value)
                 (Ok >> InitialLoadResponse)
                 (Error >> InitialLoadResponse)
-        else 
+        else
             Cmd.OfAsync.perform
                     Server.userApi.initialCounter
                     ()
@@ -185,7 +184,7 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
             if currentModel.Token.IsSome then "Bearer " + currentModel.Token.Value.Token else "no token given"
         let requestCmd =
             Cmd.OfAsync.either
-                (Server.securedApi authorizationToken).securedCounter 
+                (Server.securedApi authorizationToken).securedCounter
                 ()
                 (Ok >> GetSecuredCounterResponse)
                 (Error >> GetSecuredCounterResponse)
@@ -256,7 +255,6 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
         nextModel, cmd
     | _ -> currentModel, Cmd.none
 
-
 let safeComponents =
     let components =
         span [ ]
@@ -287,7 +285,6 @@ let debug (m:Model) =
     | { ErrorMsg = Some value } -> string m.ErrorMsg
     | { ErrorMsg = None } -> ""
 
-
 let show model =
     match model with
     | { Counter = Some counter } -> string counter.Value
@@ -307,7 +304,7 @@ let loginNavbar (model : Model) (dispatch : Msg -> unit)=
             [ str "SAFE Template - Login" ] ]
       Navbar.End.a
         [ Props [ onEnter (GetTokenRequest model.User) dispatch ] ]
-        [ 
+        [
             Navbar.Item.div
               [ ]
               [ Input.text
