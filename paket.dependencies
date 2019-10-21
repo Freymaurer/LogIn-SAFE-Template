@@ -1,6 +1,8 @@
 source https://www.nuget.org/api/v2
 
 nuget Microsoft.AspNetCore.Authentication.JwtBearer 3.0.0
+nuget Microsoft.AspNetCore.Identity.EntityFrameworkCore
+nuget Microsoft.EntityFrameworkCore.InMemory
 
 group Server
     source https://api.nuget.org/v3/index.json
