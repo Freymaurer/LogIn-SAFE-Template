@@ -49,8 +49,6 @@ type Msg =
     | GetTestRequest of string
     | GetTestResponse of Result<string, exn>
     | LogOut
-    | DotnetLogInRequest of User
-    | DotnetLogInResponse of Result<DotnetLogInResults,exn>
 
 module ServerPath =
     open System
@@ -97,11 +95,6 @@ module Server =
         |> Remoting.withRouteBuilder normalizeRoutes
         |> Remoting.withAuthorizationHeader header
         |> Remoting.buildProxy<ISecuredApi>
-
-    let dotnetApi : IDotnetCoreApi =
-        Remoting.createApi()
-        |> Remoting.withRouteBuilder normalizeRoutes
-        |> Remoting.buildProxy<IDotnetCoreApi>
 
 let myDecode64 (str64:string) =
     let l = str64.Length
@@ -276,32 +269,6 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
         nextModel, cmd
     | _, Debug (message) ->
         { currentModel with ErrorMsg = Some message}, Cmd.none
-    | _, DotnetLogInRequest (user) ->
-        let cmdLogIn =
-            Cmd.OfAsync.either
-                Server.dotnetApi.myLogIn
-                user
-                (Result.Ok >> DotnetLogInResponse)
-                (Result.Error >> DotnetLogInResponse)
-        currentModel,cmdLogIn
-    | _ , DotnetLogInResponse (Result.Error e) ->
-        let nextModel = {
-            currentModel with ErrorMsg = Some e.Message
-        }
-        nextModel,Cmd.none
-    | _ , DotnetLogInResponse (Result.Ok value) ->
-        let nextModel = {
-            currentModel with
-                Authenticated = true
-                User = {
-                    currentModel.User with
-                        Username =
-                            match value with
-                            | Success x -> x
-                            | _ -> failwith "this should never happen"
-                }
-        }
-        nextModel, Cmd.none
     | _ -> currentModel, Cmd.none
 
 let safeComponents =
@@ -427,11 +394,6 @@ let view (model : Model) (dispatch : Msg -> unit) =
                     [ Column.column [] [ button "-" (fun _ -> dispatch Decrement) ]
                       Column.column [] [ button "+" (fun _ -> dispatch Increment) ]
                       Column.column [] [ button "secret" (fun _ -> dispatch GetSecuredCounterRequest) ] ] ]
-          Box.box' [] [
-            Button.button [ Button.OnClick (fun _ -> dispatch (DotnetLogInRequest model.User)) ] [
-                str "dotnetlogin"
-            ]
-          ]
           Footer.footer [ ]
                 [ Content.content [ Content.Modifiers [ Modifier.TextAlignment (Screen.All, TextAlignment.Centered) ] ]
                     [ safeComponents
