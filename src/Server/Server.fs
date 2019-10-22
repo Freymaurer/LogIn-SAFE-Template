@@ -99,6 +99,25 @@ let port =
     "SERVER_PORT"
     |> tryGetEnv |> Option.map uint16 |> Option.defaultValue 8085us
 
+
+let dotnetLogIn user (context: HttpContext) =
+    task {
+        let signInManager = context.GetService<SignInManager<IdentityUser>>()
+        let! result = signInManager.PasswordSignInAsync(user.Username, user.Password, true, false)
+        match result.Succeeded with
+        | true ->
+           return task {
+                let userManager = context.GetService<UserManager<IdentityUser>>()
+                let user = userManager.GetUserAsync context.User
+                return DotnetLogInResults.Success user.Result.UserName
+           } |> fun x -> x.Result
+        | false -> return DotnetLogInResults.Failed (result.ToString())
+    }
+
+let netCoreApi (context: HttpContext) = {
+        myLogIn = fun (user) -> async { return (dotnetLogIn user context).Result }
+}
+
 let counterApi = {
     initialCounter = fun () -> async {return { Value = 42 }}
     initialLoad = fun (token) -> async { return ((getUserFromToken token),{ Value = 42 }) }
@@ -245,6 +264,7 @@ module MyGiraffe =
                 | false -> return! htmlView (loginPage true) next ctx
             }
 
+
     let userHandler : HttpHandler =
         fun (next : HttpFunc) (ctx : HttpContext) ->
             task {
@@ -357,21 +377,29 @@ let webApp =
             forward "" routes
         }
 
+    let dotnetServiceApi =
+        Remoting.createApi()
+        |> Remoting.withRouteBuilder Route.builder
+        |> Remoting.fromContext netCoreApi
+        |> Remoting.withDiagnosticsLogger (printfn "%s")
+        |> Remoting.buildHttpHandler
+        
+
     let myPaths =
         router {
-            get "/home"     (htmlView MyGiraffe.indexPage)
+            get "/home" (htmlView MyGiraffe.indexPage)
             get "/register" (htmlView MyGiraffe.registerPage)
-            get "/login"    (htmlView (MyGiraffe.loginPage false))
-            get "/logout"   (MyGiraffe.mustBeLoggedIn >=> MyGiraffe.logoutHandler)
-            get "/user"     (MyGiraffe.mustBeLoggedIn >=> MyGiraffe.userHandler)
-            post "/register"    MyGiraffe.registerHandler
-            post "/login"       MyGiraffe.loginHandler
+            get "/login" (htmlView (MyGiraffe.loginPage false))
+            get "/logout" (MyGiraffe.mustBeLoggedIn >=> MyGiraffe.logoutHandler)
+            get "/user" (MyGiraffe.mustBeLoggedIn >=> MyGiraffe.userHandler)
+            post "/register" MyGiraffe.registerHandler
+            post "/login" MyGiraffe.loginHandler
         }
 
     router {
         not_found_handler (setStatusCode 404 >=> text "Not Found")
-        get "/test" (Successful.OK "Test words")
         forward "/mygtest" myPaths
+        forward "" dotnetServiceApi
         forward "" userApi
         forward "" securedApi
     }

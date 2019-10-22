@@ -28,6 +28,7 @@ type Model = {
     User : User
     Token : TokenResult option
     Loading : bool
+    Authenticated : bool
     }
 
 // The Msg type defines what events/actions can occur while the application is running
@@ -48,6 +49,8 @@ type Msg =
     | GetTestRequest of string
     | GetTestResponse of Result<string, exn>
     | LogOut
+    | DotnetLogInRequest of User
+    | DotnetLogInResponse of Result<DotnetLogInResults,exn>
 
 module ServerPath =
     open System
@@ -85,15 +88,20 @@ module Server =
 
     /// A proxy you can use to talk to server directly
     let userApi : ICounterApi =
-      Remoting.createApi()
-      |> Remoting.withRouteBuilder normalizeRoutes
-      |> Remoting.buildProxy<ICounterApi>
+        Remoting.createApi()
+        |> Remoting.withRouteBuilder normalizeRoutes
+        |> Remoting.buildProxy<ICounterApi>
 
     let securedApi header : ISecuredApi =
-      Remoting.createApi()
-      |> Remoting.withRouteBuilder normalizeRoutes
-      |> Remoting.withAuthorizationHeader header
-      |> Remoting.buildProxy<ISecuredApi>
+        Remoting.createApi()
+        |> Remoting.withRouteBuilder normalizeRoutes
+        |> Remoting.withAuthorizationHeader header
+        |> Remoting.buildProxy<ISecuredApi>
+
+    let dotnetApi : IDotnetCoreApi =
+        Remoting.createApi()
+        |> Remoting.withRouteBuilder normalizeRoutes
+        |> Remoting.buildProxy<IDotnetCoreApi>
 
 let myDecode64 (str64:string) =
     let l = str64.Length
@@ -118,6 +126,7 @@ let init () : Model * Cmd<Msg> =
         User = {Username = ""; Password = ""}
         Token = if checkCookies.IsNone then None else Some { Token = checkCookies.Value }
         Loading = true
+        Authenticated = false
     }
     let loadCountCmd =
         if checkCookies.IsSome
@@ -125,8 +134,8 @@ let init () : Model * Cmd<Msg> =
             Cmd.OfAsync.either
                 Server.userApi.initialLoad
                 (checkCookies.Value)
-                (Ok >> InitialLoadResponse)
-                (Error >> InitialLoadResponse)
+                (Result.Ok >> InitialLoadResponse)
+                (Result.Error >> InitialLoadResponse)
         else
             Cmd.OfAsync.perform
                     Server.userApi.initialCounter
@@ -153,8 +162,8 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
             Cmd.OfAsync.either
                 Server.userApi.initialLoad
                 (token)
-                (Ok >> InitialLoadResponse)
-                (Error >> InitialLoadResponse)
+                (Result.Ok >> InitialLoadResponse)
+                (Result.Error >> InitialLoadResponse)
         let loadingModel = {
             currentModel with
                 Loading = true
@@ -175,7 +184,7 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
                 Loading = false
         }
         nextModel, Cmd.none
-    | _, InitialLoadResponse (Error e) ->
+    | _, InitialLoadResponse (Result.Error e) ->
         let nextModel = {
             currentModel with
                 ErrorMsg = Some e.Message
@@ -188,13 +197,13 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
             Cmd.OfAsync.either
                 (Server.securedApi authorizationToken).securedCounter
                 ()
-                (Ok >> GetSecuredCounterResponse)
-                (Error >> GetSecuredCounterResponse)
+                (Result.Ok >> GetSecuredCounterResponse)
+                (Result.Error >> GetSecuredCounterResponse)
         let nextModel = {
             currentModel with Counter = None
             }
         nextModel, requestCmd
-    | _ , GetSecuredCounterResponse (Error e) ->
+    | _ , GetSecuredCounterResponse (Result.Error e) ->
         let nextModel = {
             currentModel with
                 ErrorMsg = Some e.Message
@@ -233,10 +242,10 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
             Cmd.OfAsync.either
                 Server.userApi.logIn
                 (user)
-                (Ok >> LogInResponse)
-                (Error >> LogInResponse)
+                (Result.Ok >> LogInResponse)
+                (Result.Error >> LogInResponse)
         currentModel, cmdRequest
-    | _ , LogInResponse (Error e) ->
+    | _ , LogInResponse (Result.Error e) ->
         let nextModel = {
             currentModel with
                 ErrorMsg = Some e.Message
@@ -267,6 +276,32 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
         nextModel, cmd
     | _, Debug (message) ->
         { currentModel with ErrorMsg = Some message}, Cmd.none
+    | _, DotnetLogInRequest (user) ->
+        let cmdLogIn =
+            Cmd.OfAsync.either
+                Server.dotnetApi.myLogIn
+                user
+                (Result.Ok >> DotnetLogInResponse)
+                (Result.Error >> DotnetLogInResponse)
+        currentModel,cmdLogIn
+    | _ , DotnetLogInResponse (Result.Error e) ->
+        let nextModel = {
+            currentModel with ErrorMsg = Some e.Message
+        }
+        nextModel,Cmd.none
+    | _ , DotnetLogInResponse (Result.Ok value) ->
+        let nextModel = {
+            currentModel with
+                Authenticated = true
+                User = {
+                    currentModel.User with
+                        Username =
+                            match value with
+                            | Success x -> x
+                            | _ -> failwith "this should never happen"
+                }
+        }
+        nextModel, Cmd.none
     | _ -> currentModel, Cmd.none
 
 let safeComponents =
@@ -392,6 +427,11 @@ let view (model : Model) (dispatch : Msg -> unit) =
                     [ Column.column [] [ button "-" (fun _ -> dispatch Decrement) ]
                       Column.column [] [ button "+" (fun _ -> dispatch Increment) ]
                       Column.column [] [ button "secret" (fun _ -> dispatch GetSecuredCounterRequest) ] ] ]
+          Box.box' [] [
+            Button.button [ Button.OnClick (fun _ -> dispatch (DotnetLogInRequest model.User)) ] [
+                str "dotnetlogin"
+            ]
+          ]
           Footer.footer [ ]
                 [ Content.content [ Content.Modifiers [ Modifier.TextAlignment (Screen.All, TextAlignment.Centered) ] ]
                     [ safeComponents

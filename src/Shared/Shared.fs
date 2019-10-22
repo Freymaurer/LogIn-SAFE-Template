@@ -15,6 +15,10 @@ type LogInResults =
 | Success of TokenResult
 | InvalidPasswordUser
 
+type DotnetLogInResults =
+| Success of string
+| Failed of string
+
 module Route =
     /// Defines how routes are generated on server and mapped from client
     let builder typeName methodName =
@@ -34,3 +38,7 @@ type ICounterApi = {
 type ISecuredApi = {
     securedCounter : unit -> Async<Counter>
     }
+
+type IDotnetCoreApi = {
+    myLogIn : User -> Async<DotnetLogInResults>
+}
