@@ -7,14 +7,6 @@ type User = {
     Password : string
 }
 
-type TokenResult = {
-   Token : string
-}
-
-type LogInResults =
-| Success of TokenResult
-| InvalidPasswordUser
-
 type DotnetLogInResults =
 | Success of string
 | Failed of string
@@ -29,14 +21,6 @@ module Route =
 type ICounterApi = {
     // returns initial count of 42
     initialCounter : unit -> Async<Counter>
-    //validated token and returns related user name and initial count of 42
-    initialLoad : string -> Async<string option * Counter>
-    logIn : User -> Async<LogInResults>
-    validateToken : string -> Async<bool>
-    }
-
-type ISecuredApi = {
-    securedCounter : unit -> Async<Counter>
     }
 
 type IDotnetCoreApi = {

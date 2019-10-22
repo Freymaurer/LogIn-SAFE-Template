@@ -26,7 +26,6 @@ type Model = {
     Counter: Counter option
     ErrorMsg : string option
     User : User
-    Token : TokenResult option
     Loading : bool
     Authenticated : bool
     }
@@ -37,18 +36,11 @@ type Msg =
     | Increment
     | Decrement
     | InitialCountLoaded of Counter
-    | InitialLoadRequest of string
-    | InitialLoadResponse of Result<string option * Counter,exn>
-    | GetSecuredCounterRequest
-    | GetSecuredCounterResponse of Result<Counter, exn>
     | UpdateUsername of string
     | UpdateUserPw of string
-    | LogInRequest of User
-    | LogInResponse of Result<LogInResults, exn>
     | Debug of string
     | GetTestRequest of string
     | GetTestResponse of Result<string, exn>
-    | LogOut
     | DotnetLogInRequest of User
     | DotnetLogInResponse of Result<DotnetLogInResults,exn>
 
@@ -92,12 +84,6 @@ module Server =
         |> Remoting.withRouteBuilder normalizeRoutes
         |> Remoting.buildProxy<ICounterApi>
 
-    let securedApi header : ISecuredApi =
-        Remoting.createApi()
-        |> Remoting.withRouteBuilder normalizeRoutes
-        |> Remoting.withAuthorizationHeader header
-        |> Remoting.buildProxy<ISecuredApi>
-
     let dotnetApi : IDotnetCoreApi =
         Remoting.createApi()
         |> Remoting.withRouteBuilder normalizeRoutes
@@ -113,34 +99,18 @@ let myDecode64 (str64:string) =
 
 // defines the initial state and initial command (= side-effect) of the application
 let init () : Model * Cmd<Msg> =
-    let checkCookies =
-        let cookieStrArr =
-            Browser.Dom.document.cookie
-            |> fun x -> x.Split([|';'|])
-        cookieStrArr
-        |> Array.tryFindIndex (fun x -> x.StartsWith "testCookieSignUp=")
-        |> fun x -> if x.IsSome then Some (cookieStrArr.[x.Value].Replace("testCookieSignUp=","")) else None
     let initialModel = {
         Counter = None
         ErrorMsg = None
         User = {Username = ""; Password = ""}
-        Token = if checkCookies.IsNone then None else Some { Token = checkCookies.Value }
         Loading = true
         Authenticated = false
     }
     let loadCountCmd =
-        if checkCookies.IsSome
-        then
-            Cmd.OfAsync.either
-                Server.userApi.initialLoad
-                (checkCookies.Value)
-                (Result.Ok >> InitialLoadResponse)
-                (Result.Error >> InitialLoadResponse)
-        else
-            Cmd.OfAsync.perform
-                    Server.userApi.initialCounter
-                    ()
-                    InitialCountLoaded
+        Cmd.OfAsync.perform
+                Server.userApi.initialCounter
+                ()
+                InitialCountLoaded
     initialModel, loadCountCmd
 
 // The update function computes the next state of the application based on the current state and the incoming events/messages
@@ -157,69 +127,6 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
     | _, InitialCountLoaded initialCount ->
         let nextModel = { currentModel with Counter = Some initialCount }
         nextModel, Cmd.none
-    | _, InitialLoadRequest token ->
-        let cmd =
-            Cmd.OfAsync.either
-                Server.userApi.initialLoad
-                (token)
-                (Result.Ok >> InitialLoadResponse)
-                (Result.Error >> InitialLoadResponse)
-        let loadingModel = {
-            currentModel with
-                Loading = true
-        }
-        loadingModel, cmd
-    | _, InitialLoadResponse (Ok value) ->
-        let (userNameOpt,counter) = value
-        let nextModel = {
-            currentModel with
-                Counter = Some counter
-                Token = if userNameOpt.IsSome then currentModel.Token else None
-                User =
-                    if userNameOpt.IsSome
-                    then { currentModel.User with Username = userNameOpt.Value}
-                    else
-                        Browser.Dom.document.cookie <- (sprintf "testCookieSignUp=None;max-age=0" )
-                        { Username = ""; Password = ""}
-                Loading = false
-        }
-        nextModel, Cmd.none
-    | _, InitialLoadResponse (Result.Error e) ->
-        let nextModel = {
-            currentModel with
-                ErrorMsg = Some e.Message
-        }
-        nextModel, Cmd.none
-    | Some _ , GetSecuredCounterRequest ->
-        let authorizationToken =
-            if currentModel.Token.IsSome then "Bearer " + currentModel.Token.Value.Token else "no token given"
-        let requestCmd =
-            Cmd.OfAsync.either
-                (Server.securedApi authorizationToken).securedCounter
-                ()
-                (Result.Ok >> GetSecuredCounterResponse)
-                (Result.Error >> GetSecuredCounterResponse)
-        let nextModel = {
-            currentModel with Counter = None
-            }
-        nextModel, requestCmd
-    | _ , GetSecuredCounterResponse (Result.Error e) ->
-        let nextModel = {
-            currentModel with
-                ErrorMsg = Some e.Message
-        }
-        let loadCountCmd =
-            Cmd.OfAsync.perform
-                Server.userApi.initialCounter
-                ()
-                InitialCountLoaded
-        nextModel, loadCountCmd
-    | _ , GetSecuredCounterResponse (Ok value) ->
-        let nextModel = {
-            currentModel with
-                Counter = Some value
-        }
-        nextModel, Cmd.none
     | _ , UpdateUsername (name:string) ->
         let nextModel = {
             currentModel with
@@ -232,50 +139,6 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
                 User = {currentModel.User with Password = pw}
         }
         nextModel, Cmd.none
-        // verify user and return token to model and cookies
-    | _ , LogInRequest (user:User) ->
-        //let checkName =
-        //    let input = Browser.Dom.document.getElementById "UserName"
-        //    input.innerHTML
-        //    if user.Username <>  
-        let cmdRequest =
-            Cmd.OfAsync.either
-                Server.userApi.logIn
-                (user)
-                (Result.Ok >> LogInResponse)
-                (Result.Error >> LogInResponse)
-        currentModel, cmdRequest
-    | _ , LogInResponse (Result.Error e) ->
-        let nextModel = {
-            currentModel with
-                ErrorMsg = Some e.Message
-        }
-        nextModel,Cmd.none
-    | _ , LogInResponse (Ok value) ->
-        let nextModel =
-            match value with
-            | LogInResults.InvalidPasswordUser ->
-                { currentModel with ErrorMsg = Some "The username or password you entered is incorrect."}
-            | LogInResults.Success token ->
-                let oneYear = 31536000
-                Browser.Dom.document.cookie <- (sprintf "testCookieSignUp=%s;max-age=%i" token.Token oneYear)
-                { currentModel with Token = Some token }
-        nextModel, Cmd.none
-    | _, LogOut ->
-        Browser.Dom.document.cookie <- (sprintf "testCookieSignUp=None;max-age=0" )
-        let nextModel = {
-            currentModel with
-                Token = None
-                Counter = None
-        }
-        let cmd =
-            Cmd.OfAsync.perform
-                Server.userApi.initialCounter
-                ()
-                InitialCountLoaded
-        nextModel, cmd
-    | _, Debug (message) ->
-        { currentModel with ErrorMsg = Some message}, Cmd.none
     | _, DotnetLogInRequest (user) ->
         let cmdLogIn =
             Cmd.OfAsync.either
@@ -302,6 +165,8 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
                 }
         }
         nextModel, Cmd.none
+    | _, Debug (message) ->
+        { currentModel with ErrorMsg = Some message}, Cmd.none
     | _ -> currentModel, Cmd.none
 
 let safeComponents =
@@ -352,7 +217,7 @@ let loginNavbar (model : Model) (dispatch : Msg -> unit)=
         [ Heading.h2 [ ]
             [ str "SAFE Template - Login" ] ]
       Navbar.End.a
-        [ Props [ onEnter (LogInRequest model.User) dispatch ] ]
+        [ ]
         [
             Navbar.Item.div
               [ ]
@@ -381,7 +246,7 @@ let loginNavbar (model : Model) (dispatch : Msg -> unit)=
             Navbar.Item.div
               [ ]
               [ Button.a
-                  [ Button.OnClick (fun _ -> dispatch (LogInRequest model.User) ) ]
+                  [ Button.OnClick (fun _ -> dispatch (DotnetLogInRequest model.User)) ]
                   [ str "Login" ]
               ]
         ]
@@ -407,7 +272,7 @@ let loggedInNavbar (model : Model) (dispatch : Msg -> unit) =
                 Navbar.Dropdown.div [ Navbar.Dropdown.IsRight ] [
                     //Navbar.divider [ ] [ ]
                     Navbar.Item.a
-                        [ Navbar.Item.Props [OnClick ( fun _ -> dispatch LogOut)] ]
+                        [ Navbar.Item.Props [OnClick ( fun _ -> dispatch (Debug "Clicked a button"))] ]
                         [ str "Logout" ]
                 ]
             ]
@@ -418,7 +283,8 @@ let loggedInNavbar (model : Model) (dispatch : Msg -> unit) =
 let view (model : Model) (dispatch : Msg -> unit) =
     div []
         [ Navbar.navbar [ Navbar.Color IsPrimary ]
-            (if model.Token.IsSome then (loggedInNavbar model dispatch) else (loginNavbar model dispatch ))
+            //(if model.Token.IsSome then (loggedInNavbar model dispatch) else (loginNavbar model dispatch ))
+            (loginNavbar model dispatch)
           br []
           Container.container []
               [ Content.content [ Content.Modifiers [ Modifier.TextAlignment (Screen.All, TextAlignment.Centered) ] ]
@@ -426,12 +292,7 @@ let view (model : Model) (dispatch : Msg -> unit) =
                 Columns.columns []
                     [ Column.column [] [ button "-" (fun _ -> dispatch Decrement) ]
                       Column.column [] [ button "+" (fun _ -> dispatch Increment) ]
-                      Column.column [] [ button "secret" (fun _ -> dispatch GetSecuredCounterRequest) ] ] ]
-          Box.box' [] [
-            Button.button [ Button.OnClick (fun _ -> dispatch (DotnetLogInRequest model.User)) ] [
-                str "dotnetlogin"
-            ]
-          ]
+                      Column.column [] [ button "secret" (fun _ -> dispatch (Debug "Clicked a button")) ] ] ]
           Footer.footer [ ]
                 [ Content.content [ Content.Modifiers [ Modifier.TextAlignment (Screen.All, TextAlignment.Centered) ] ]
                     [ safeComponents
