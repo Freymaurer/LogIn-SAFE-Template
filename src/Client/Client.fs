@@ -13,10 +13,39 @@ open Shared
 
 let [<Literal>] ENTER_KEY = 13.
 
+type ExtraReactElement =
+|EmptyElement
+|RegisterModal
+|Message of string
+
 let onEnter msg dispatch =
     OnKeyDown (fun ev ->
         if ev.keyCode = ENTER_KEY then
             dispatch msg)
+
+
+let emptyStr = str ""
+
+let messageContainer (content:string) msg =
+    Container.container [ ] [
+        Columns.columns [ Columns.IsCentered ][
+            Column.column [ Column.Width (Screen.All,Column.IsHalf) ][
+                Content.content [
+                    Content.Modifiers [Modifier.TextColor IsDanger;Modifier.TextAlignment (Screen.All,TextAlignment.Centered)]
+                    Content.Props [
+                        Style [
+                            MarginTop "1%"; MarginBottom "2%"
+                        ]
+                    ]
+                    ] [
+                    str content
+                ]
+            ]
+            Column.column [ Column.Width (Screen.All,Column.Is1) ][
+                Delete.delete [ Delete.OnClick msg ][]
+            ]
+        ]
+    ]
 
 // The model holds data that you want to keep track of while the application is running
 // in this case, we are keeping track of a counter
@@ -25,9 +54,12 @@ let onEnter msg dispatch =
 type Model = {
     Counter: Counter option
     ErrorMsg : string option
+    LoginModel : LoginModel
+    RegisterModel : RegisterModel
     User : User option
     Loading : bool
     Authenticated : bool
+    ExtraReactElement : ExtraReactElement 
     }
 
 // The Msg type defines what events/actions can occur while the application is running
@@ -36,17 +68,21 @@ type Msg =
     | Increment
     | Decrement
     | InitialCountLoaded of Counter
-    | UpdateUsername of string
-    | UpdateUserPw of string
+    | UpdateLoginUsername of string
+    | UpdateLoginUserPw of string
+    | UpdateRegisterModel of RegisterModel
+    | UpdateExtraElement of ExtraReactElement
     | Debug of string
     | GetTestRequest of string
     | GetTestResponse of Result<string, exn>
-    | DotnetLogInRequest of User
-    | DotnetLogInResponse of Result<DotnetLogInResults,exn>
+    | DotnetRegisterRequest of RegisterModel
+    | DotnetRegisterResponse of Result<DotnetRegisterResults,exn>
+    | DotnetLoginRequest of LoginModel
+    | DotnetLoginResponse of Result<DotnetLoginResults,exn>
     | DotnetGetUserRequest
     | DotnetGetUserResponse of Result<User,exn>
-    | DotnetUserLogOutRequest
-    | DotnetUserLogOutResponse of Result<DotnetLogOutResults,exn>
+    | DotnetLogOutRequest
+    | DotnetLogOutResponse of Result<DotnetLogOutResults,exn>
     | GetUserCounterRequest
     | GetUserCounterResponse of Result<Counter,exn>
 
@@ -112,10 +148,13 @@ let myDecode64 (str64:string) =
 let init () : Model * Cmd<Msg> =
     let initialModel = {
         Counter = None
-        ErrorMsg = None
         User = None
         Loading = true
         Authenticated = false
+        ErrorMsg = None
+        LoginModel = {Username = ""; Password = ""}
+        RegisterModel = {Username = "";Password = "";Email = ""}
+        ExtraReactElement = EmptyElement
     }
     let loadCountCmd =
         Cmd.OfAsync.perform
@@ -140,48 +179,93 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
         let nextModel = { currentModel with Counter = Some initialCount; Loading = false }
         nextModel, Cmd.none
         /// functions to manage input fields for user log in
-    | _ , UpdateUsername (name:string) ->
+    | _ , UpdateLoginUsername (name:string) ->
         let nextModel = {
             currentModel with
-                User = if currentModel.User.IsSome then Some {currentModel.User.Value with Username = name} else Some { Username = name; Password = ""}
+                LoginModel = {currentModel.LoginModel with Username = name}
         }
         nextModel, Cmd.none
-    | _ , UpdateUserPw (pw:string) ->
+    | _ , UpdateLoginUserPw (pw:string) ->
         let nextModel = {
             currentModel with
-                User = if currentModel.User.IsSome then Some {currentModel.User.Value with Password = pw} else Some { Password = pw; Username = ""}
+                LoginModel = {currentModel.LoginModel with Password = pw}
         }
         nextModel, Cmd.none
-        /// functions to log in user via asp.net 
-    | _, DotnetLogInRequest (user) ->
-        let cmdLogIn =
+    | _, UpdateRegisterModel (registerModel) ->
+        let nextModel = {
+            currentModel with
+                RegisterModel = registerModel
+        }
+        nextModel, Cmd.none
+    | _, UpdateExtraElement (element) ->
+        let nextModel = {
+            currentModel with
+                ExtraReactElement = element
+        }
+        nextModel,Cmd.none
+        ///functions to handle user registration
+    | _, DotnetRegisterRequest (registermodel) ->
+        let nextModel = { currentModel with ExtraReactElement = EmptyElement}
+        let cmd =
             Cmd.OfAsync.either
-                Server.dotnetApi.dotnetLogIn
+                Server.dotnetApi.dotnetRegister
+                (registermodel)
+                (Ok >> DotnetRegisterResponse)
+                (Error >> DotnetRegisterResponse)
+        nextModel,cmd
+    | _, DotnetRegisterResponse (Ok value) ->
+        let nextModel,cmd =
+            match value with
+            | RegisterFail x ->
+                { currentModel with
+                    Loading = false
+                    ExtraReactElement = Message x
+                } , Cmd.none
+            | RegisterSuccess x ->
+                { currentModel with
+                    Loading = false
+                    ExtraReactElement = Message x
+                }, Cmd.ofMsg DotnetGetUserRequest
+        nextModel, cmd
+    | _, DotnetRegisterResponse (Error e) ->
+        let nextModel = {
+            currentModel with
+                Loading = false
+                ErrorMsg = Some e.Message
+                ExtraReactElement = Message e.Message
+        }
+        nextModel, Cmd.none
+        /// functions to log in user via asp.net
+    | _, DotnetLoginRequest (user) ->
+        let cmdLogin =
+            Cmd.OfAsync.either
+                Server.dotnetApi.dotnetLogin
                 user
-                (Result.Ok >> DotnetLogInResponse)
-                (Result.Error >> DotnetLogInResponse)
+                (Result.Ok >> DotnetLoginResponse)
+                (Result.Error >> DotnetLoginResponse)
         let nextModel = {
             currentModel with
                 Loading = true
             }
-        nextModel,cmdLogIn
-    | _ , DotnetLogInResponse (Result.Error e) ->
+        nextModel,cmdLogin
+    | _ , DotnetLoginResponse (Result.Error e) ->
         let nextModel = {
             currentModel with
                 ErrorMsg = Some e.Message
                 Loading = false
         }
-        nextModel,Cmd.none
-    | _ , DotnetLogInResponse (Result.Ok value) ->
-        let x =
+        nextModel,Cmd.ofMsg (UpdateExtraElement (Message e.Message))
+    | _ , DotnetLoginResponse (Result.Ok value) ->
+        let (message,cmd) =
             match value with
-            | DotnetLogInResults.Success _ -> "Log In Succeded"
-            | DotnetLogInResults.Failed _ -> "Log In Failed"
+            | LoginSuccess _ -> "Log In Succeded", Cmd.ofMsg DotnetGetUserRequest
+            | LoginFail _ -> "Log In Failed", Cmd.ofMsg (UpdateExtraElement (Message "Log In Failed"))
         let nextModel = {
             currentModel with
-                ErrorMsg = Some x
+                ErrorMsg = Some message
+                Loading = false
         }
-        nextModel, Cmd.ofMsg DotnetGetUserRequest
+        nextModel, cmd
         /// functions to access already logged in user information
     | _, DotnetGetUserRequest ->
         let cmd =
@@ -232,23 +316,23 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
                 Loading = false
                 ErrorMsg = Some e.Message
         }
-        nextModel, Cmd.none
+        nextModel, Cmd.ofMsg (UpdateExtraElement (Message "This function is for User only"))
         /// functions to handle user log out
-    | _, DotnetUserLogOutRequest ->
+    | _, DotnetLogOutRequest ->
         let cmd =
             Cmd.OfAsync.either
                 Server.dotnetSecureApi.dotnetUserLogOut
                 ()
-                (Ok >> DotnetUserLogOutResponse)
-                (Error >> DotnetUserLogOutResponse)
+                (Ok >> DotnetLogOutResponse)
+                (Error >> DotnetLogOutResponse)
         let nextModel = {
             currentModel with
                 Loading = true
         }
         nextModel, cmd
-    | _, DotnetUserLogOutResponse (Ok value) ->
+    | _, DotnetLogOutResponse (Ok value) ->
         init()
-    | _, DotnetUserLogOutResponse (Error e) ->
+    | _, DotnetLogOutResponse (Error e) ->
         let nextModel = {
             currentModel with
                 ErrorMsg = Some e.Message
@@ -257,6 +341,79 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
     | _, Debug (message) ->
         { currentModel with ErrorMsg = Some message}, Cmd.none
     | _ -> currentModel, Cmd.none
+
+
+let registerModal (model : Model) (dispatch : Msg -> unit) =
+    Modal.modal [
+        Modal.IsActive true
+        ] [
+        Modal.background [ Props [OnClick (fun _ -> dispatch (UpdateExtraElement EmptyElement) )] ] [ ]
+        Modal.Card.card [
+            Modifiers [ Modifier.BackgroundColor IsWhite ]
+            Props [ Style [ Height "80%";BorderRadius "15px" ] ]
+            ] [
+            Modal.Card.head [
+                Modifiers [Modifier.BackgroundColor IsWhite]
+                Props [ Style [ BorderBottom "0px"] ]
+                ] [
+                Modal.Card.title [ ] [
+                    br []
+                    str "Create your account"
+                ]
+            ]
+            Modal.Card.body
+                [ ] [
+                br []
+                Input.text [
+                    Input.OnChange
+                        (fun e ->
+                            let newModel = {model.RegisterModel with Username = e.Value}
+                            dispatch (UpdateRegisterModel newModel)
+                            )
+                    Input.Placeholder "Username"
+                    Input.ValueOrDefault model.RegisterModel.Username
+                ]
+                br []
+                br []
+                Input.email [
+                    Input.OnChange
+                        (fun e ->
+                            let newModel = {model.RegisterModel with Email = e.Value}
+                            dispatch (UpdateRegisterModel newModel)
+                            )
+                    Input.Placeholder "Email"
+                    Input.ValueOrDefault model.RegisterModel.Email
+                ]
+                br []
+                br []
+                Input.password [
+                    Input.OnChange
+                        (fun e ->
+                            let newModel = {model.RegisterModel with Password = e.Value}
+                            dispatch (UpdateRegisterModel newModel)
+                            )
+                    Input.Placeholder "Password"
+                    Input.ValueOrDefault model.RegisterModel.Password
+                ]
+                br []
+                br []
+                br []
+                br []
+                Columns.columns [][
+                    Column.column [Column.Offset (Screen.All,Column.IsThreeFifths)] [
+                        Button.button [
+                            Button.Color IsInfo
+                            (if model.RegisterModel.Username = "" || model.RegisterModel.Password = "" || model.RegisterModel.Email = "" then Button.Disabled true else Button.Disabled false )
+                            Button.OnClick (fun _ -> dispatch (DotnetRegisterRequest model.RegisterModel))
+                            ][
+                            str "Register"
+                        ]
+                    ]
+                ]
+                ]
+            ] 
+        ]
+
 
 let safeComponents =
     let components =
@@ -300,45 +457,97 @@ let button txt onClick =
           Button.OnClick onClick ]
         [ str txt ]
 
-let loginNavbar (model : Model) (dispatch : Msg -> unit)=
-    [ Navbar.Item.div
+let loginNavbar (model : Model) (dispatch : Msg -> unit) = [
+    Navbar.Item.div
         [ ]
         [ Heading.h2 [ ]
             [ str "SAFE Template - Login" ] ]
-      Navbar.End.a
-        [ ]
-        [
-            Navbar.Item.div
-              [ ]
-              [ Input.text
-                  [ Input.OnChange (
-                      fun e ->
-                          //let newUser = { model.User with Username = e.Value}
-                          dispatch (UpdateUsername e.Value)
-                      )
-                    Input.Placeholder "Username"
-                    Input.Props [ Id "UserName" ]
-                      ]
-              ]
-            Navbar.Item.div
-              [ ]
-              [ Input.password
-                  [ Input.OnChange (
-                      fun e ->
-                          //let newUser = { model.User with Password = e.Value}
-                          dispatch (UpdateUserPw e.Value)
-                      )
-                    Input.Placeholder "Password"
-                    Input.Props [ Id "UserPw" ]
-                      ]
-              ]
-            Navbar.Item.div
-              [ ]
-              [ Button.a
-                  [ Button.OnClick (fun _ -> dispatch (DotnetLogInRequest model.User.Value)) ]
-                  [ str "Login" ]
-              ]
+    Navbar.End.a [ ] [
+        Navbar.Item.div [
+            Navbar.Item.IsHoverable;
+            Navbar.Item.HasDropdown;
+        ] [
+            Navbar.Link.a [ ] [
+                Text.span
+                    [ Modifiers [ Modifier.TextWeight TextWeight.SemiBold; Modifier.TextColor Color.IsWhiteBis ] ]
+                    [ str "Log In"]
+            ]
+            Navbar.Dropdown.a [
+                Navbar.Dropdown.IsRight
+                Navbar.Dropdown.Props [ Style [ Width "15rem" ] ]
+                ] [
+                Navbar.Item.div
+                    [ Navbar.Item.Props [Style [Cursor "text"]];Navbar.Item.Modifiers [Modifier.TextColor IsGrey] ]
+                    [ str "Have an account?" ]
+                Navbar.Item.div
+                    [ ]
+                    [ Input.text
+                        [ Input.OnChange (
+                            fun e ->
+                                //let newUser = { model.User with Username = e.Value}
+                                dispatch (UpdateLoginUsername e.Value)
+                            )
+                          Input.Placeholder "Username"
+                          Input.Props [ Id "UserName" ]
+                            ]
+                    ]
+                Navbar.Item.div
+                    [ ]
+                    [ Input.password
+                        [ Input.OnChange (
+                            fun e ->
+                                //let newUser = { model.User with Password = e.Value}
+                                dispatch (UpdateLoginUserPw e.Value)
+                            )
+                          Input.Placeholder "Password"
+                          Input.Props [ Id "UserPw" ]
+                            ]
+                    ]
+                Navbar.Item.a
+                    [
+                        Navbar.Item.Props [
+                            OnClick (fun _ -> dispatch (DotnetLoginRequest model.LoginModel));
+                            Style [
+                                PaddingLeft "5%" ; PaddingRight "5%";
+                                AlignContent AlignContentOptions.Center;
+                                BorderRadius "10px"
+                                MarginLeft "5%"; MarginRight "5%"; MarginTop "3%"
+                            ]
+                        ]
+                        Navbar.Item.Modifiers [ Modifier.BackgroundColor IsInfo; Modifier.TextColor IsWhite ]
+                    ]
+                    [ Text.p
+                        [ Modifiers [ Modifier.TextAlignment (Screen.All,TextAlignment.Centered) ]; Props [ Style [ TextAlign TextAlignOptions.Center; Width "90%" ] ] ]
+                        [ str "Login" ]
+                    ]
+                Navbar.divider [] []
+                Navbar.Item.div
+                    [ Navbar.Item.Props [Style [Cursor "text"]];Navbar.Item.Modifiers [Modifier.TextColor IsGrey] ]
+                    [ str "New here?" ]
+                Navbar.Item.a
+                    [
+                        Navbar.Item.Props [
+                            OnClick (fun _ -> dispatch (UpdateExtraElement RegisterModal));
+                            Style [
+                                PaddingLeft "5%" ; PaddingRight "5%";
+                                AlignContent AlignContentOptions.Center;
+                                BorderRadius "10px"
+                                MarginLeft "5%"; MarginRight "5%"; MarginTop "3%"; MarginBottom "7%"
+                                Border @"1px solid hsl(204, 86%, 53%)"
+                            ]
+                        ]
+                        Navbar.Item.Modifiers [Modifier.TextColor IsInfo ]
+                    ]
+                    [ Text.p [
+                        Modifiers [ Modifier.TextAlignment (Screen.All,TextAlignment.Centered) ];
+                        Props [ Style [ TextAlign TextAlignOptions.Center; Width "90%" ] ]
+                        ]
+                        [ str "Sign Up" ]
+                    ]
+            ]
         ]
+        Navbar.Item.div [] [br []]
+    ]
     ]
 
 let loggedInNavbar (model : Model) (dispatch : Msg -> unit) =
@@ -361,7 +570,7 @@ let loggedInNavbar (model : Model) (dispatch : Msg -> unit) =
                 Navbar.Dropdown.div [ Navbar.Dropdown.IsRight ] [
                     Navbar.divider [ ] [ ]
                     Navbar.Item.a
-                        [ Navbar.Item.Props [OnClick ( fun _ -> dispatch DotnetUserLogOutRequest)] ]
+                        [ Navbar.Item.Props [OnClick ( fun _ -> dispatch DotnetLogOutRequest)] ]
                         [ str "Logout" ]
                 ]
             ]
@@ -369,14 +578,22 @@ let loggedInNavbar (model : Model) (dispatch : Msg -> unit) =
         ]
     ]
 
+
+
 let view (model : Model) (dispatch : Msg -> unit) =
-    div []
+    let extraEle =
+        match model.ExtraReactElement with
+        |EmptyElement -> emptyStr
+        |RegisterModal -> registerModal model dispatch
+        |Message x -> messageContainer x (fun _ -> dispatch (UpdateExtraElement EmptyElement))
+    div [ Style [  ] ]
         [ Navbar.navbar [ Navbar.Color IsPrimary ]
             (if model.Authenticated = true then (loggedInNavbar model dispatch) else (loginNavbar model dispatch ))
           br []
           Container.container []
               [ Content.content [ Content.Modifiers [ Modifier.TextAlignment (Screen.All, TextAlignment.Centered) ] ]
                     [ Heading.h3 [] [ str ("Press buttons to manipulate counter: " + show model) ] ]
+                extraEle
                 Columns.columns []
                     [ Column.column [] [ button "-" (fun _ -> dispatch Decrement) ]
                       Column.column [] [ button "+" (fun _ -> dispatch Increment) ]

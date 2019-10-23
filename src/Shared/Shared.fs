@@ -4,16 +4,31 @@ type Counter = { Value : int }
 
 type User = {
     Username : string
+    Email : string
+}
+
+type LoginModel = {
+    Username : string
     Password : string
 }
 
-type DotnetLogInResults =
-| Success of string
-| Failed of string
+type RegisterModel = {
+    Username : string
+    Password : string
+    Email : string
+}
+
+type DotnetLoginResults =
+| LoginSuccess of string
+| LoginFail of string
 
 type DotnetLogOutResults =
-| Success of string
-| Failed of string
+| LogoutSuccess of string
+| LogoutFail of string
+
+type DotnetRegisterResults =
+| RegisterSuccess of string
+| RegisterFail of string
 
 module Route =
     /// Defines how routes are generated on server and mapped from client
@@ -28,7 +43,8 @@ type ICounterApi = {
     }
 
 type IDotnetApi = {
-    dotnetLogIn : User -> Async<DotnetLogInResults>
+    dotnetLogin : LoginModel -> Async<DotnetLoginResults>
+    dotnetRegister : RegisterModel -> Async<DotnetRegisterResults>
 }
 
 type IDotnetSecureApi = {

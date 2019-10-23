@@ -25,32 +25,56 @@ let port =
 
 module DotnetModule =
 
-    let dotnetLogIn user (context: HttpContext) =
+    open System.Text
+
+    let showErrors (errors : IdentityError seq) =
+        errors
+        |> Seq.fold (fun acc err ->
+            sprintf "Code: %s, Description: %s" err.Code err.Description
+            |> acc.AppendLine : StringBuilder) (StringBuilder(""))
+        |> (fun x -> x.ToString())
+
+    let dotnetLogin (user:LoginModel) (context: HttpContext) =
         task {
             let signInManager = context.GetService<SignInManager<IdentityUser>>()
             let! result = signInManager.PasswordSignInAsync(user.Username, user.Password, true, false)
             match result.Succeeded with
             | true ->
-               return DotnetLogInResults.Success (result.ToString())
-            | false -> return DotnetLogInResults.Failed (result.ToString())
+               return LoginSuccess (result.ToString())
+            | false -> return LoginFail (result.ToString())
         } |> fun x -> x.Result
 
     let dotnetGetUser (context: HttpContext) =
         task {
             let userManager = context.GetService<UserManager<IdentityUser>>()
             let! user = userManager.GetUserAsync context.User
-            return { Username = user.UserName; Password = "" }
+            return { Username = user.UserName; Email = user.Email }
         } |> fun x -> x.Result
 
     let dotnetUserLogOut (context: HttpContext) =
         task {
             let signInManager = context.GetService<SignInManager<IdentityUser>>()
             do! signInManager.SignOutAsync()
-            return DotnetLogOutResults.Success "Log Out Success"
+            return LogoutSuccess "Log Out Success"
+        } |> fun x -> x.Result
+
+    let dotnetRegistration (registerModel:RegisterModel) (context: HttpContext) =
+
+        task {
+            let  user        = IdentityUser(UserName = registerModel.Username, Email = registerModel.Email)
+            let  userManager = context.GetService<UserManager<IdentityUser>>()
+            let! result      = userManager.CreateAsync(user, registerModel.Password)
+            match result.Succeeded with
+            | false -> return (RegisterFail (showErrors result.Errors))
+            | true  ->
+                let signInManager = context.GetService<SignInManager<IdentityUser>>()
+                do! signInManager.SignInAsync(user, true)
+                return RegisterSuccess "Registration Successful"
         } |> fun x -> x.Result
 
 let dotnetApi (context: HttpContext) = {
-    dotnetLogIn = fun (user) -> async { return (DotnetModule.dotnetLogIn user context) }
+    dotnetLogin = fun (loginModel) -> async { return (DotnetModule.dotnetLogin loginModel context) }
+    dotnetRegister = fun (registerModel) -> async { return (DotnetModule.dotnetRegistration registerModel context) }
 }
 
 let nice() =
