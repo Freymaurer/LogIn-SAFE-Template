@@ -25,7 +25,7 @@ let onEnter msg dispatch =
 type Model = {
     Counter: Counter option
     ErrorMsg : string option
-    User : User
+    User : User option
     Loading : bool
     Authenticated : bool
     }
@@ -43,6 +43,12 @@ type Msg =
     | GetTestResponse of Result<string, exn>
     | DotnetLogInRequest of User
     | DotnetLogInResponse of Result<DotnetLogInResults,exn>
+    | DotnetGetUserRequest
+    | DotnetGetUserResponse of Result<User,exn>
+    | DotnetUserLogOutRequest
+    | DotnetUserLogOutResponse of Result<DotnetLogOutResults,exn>
+    | GetUserCounterRequest
+    | GetUserCounterResponse of Result<Counter,exn>
 
 module ServerPath =
     open System
@@ -84,10 +90,15 @@ module Server =
         |> Remoting.withRouteBuilder normalizeRoutes
         |> Remoting.buildProxy<ICounterApi>
 
-    let dotnetApi : IDotnetCoreApi =
+    let dotnetApi : IDotnetApi =
         Remoting.createApi()
         |> Remoting.withRouteBuilder normalizeRoutes
-        |> Remoting.buildProxy<IDotnetCoreApi>
+        |> Remoting.buildProxy<IDotnetApi>
+
+    let dotnetSecureApi : IDotnetSecureApi =
+        Remoting.createApi()
+        |> Remoting.withRouteBuilder normalizeRoutes
+        |> Remoting.buildProxy<IDotnetSecureApi>
 
 let myDecode64 (str64:string) =
     let l = str64.Length
@@ -102,7 +113,7 @@ let init () : Model * Cmd<Msg> =
     let initialModel = {
         Counter = None
         ErrorMsg = None
-        User = {Username = ""; Password = ""}
+        User = None
         Loading = true
         Authenticated = false
     }
@@ -118,6 +129,7 @@ let init () : Model * Cmd<Msg> =
 // these commands in turn, can dispatch messages to which the update function will react.
 let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
     match currentModel.Counter, msg with
+        /// functions to manage counter
     | Some counter, Increment ->
         let nextModel = { currentModel with Counter = Some { Value = counter.Value + 1 } }
         nextModel, Cmd.none
@@ -125,44 +137,121 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
         let nextModel = { currentModel with Counter = Some { Value = counter.Value - 1 } }
         nextModel, Cmd.none
     | _, InitialCountLoaded initialCount ->
-        let nextModel = { currentModel with Counter = Some initialCount }
+        let nextModel = { currentModel with Counter = Some initialCount; Loading = false }
         nextModel, Cmd.none
+        /// functions to manage input fields for user log in
     | _ , UpdateUsername (name:string) ->
         let nextModel = {
             currentModel with
-                User = {currentModel.User with Username = name}
+                User = if currentModel.User.IsSome then Some {currentModel.User.Value with Username = name} else Some { Username = name; Password = ""}
         }
         nextModel, Cmd.none
     | _ , UpdateUserPw (pw:string) ->
         let nextModel = {
             currentModel with
-                User = {currentModel.User with Password = pw}
+                User = if currentModel.User.IsSome then Some {currentModel.User.Value with Password = pw} else Some { Password = pw; Username = ""}
         }
         nextModel, Cmd.none
+        /// functions to log in user via asp.net 
     | _, DotnetLogInRequest (user) ->
         let cmdLogIn =
             Cmd.OfAsync.either
-                Server.dotnetApi.myLogIn
+                Server.dotnetApi.dotnetLogIn
                 user
                 (Result.Ok >> DotnetLogInResponse)
                 (Result.Error >> DotnetLogInResponse)
-        currentModel,cmdLogIn
+        let nextModel = {
+            currentModel with
+                Loading = true
+            }
+        nextModel,cmdLogIn
     | _ , DotnetLogInResponse (Result.Error e) ->
         let nextModel = {
-            currentModel with ErrorMsg = Some e.Message
+            currentModel with
+                ErrorMsg = Some e.Message
+                Loading = false
         }
         nextModel,Cmd.none
     | _ , DotnetLogInResponse (Result.Ok value) ->
+        let x =
+            match value with
+            | DotnetLogInResults.Success _ -> "Log In Succeded"
+            | DotnetLogInResults.Failed _ -> "Log In Failed"
+        let nextModel = {
+            currentModel with
+                ErrorMsg = Some x
+        }
+        nextModel, Cmd.ofMsg DotnetGetUserRequest
+        /// functions to access already logged in user information
+    | _, DotnetGetUserRequest ->
+        let cmd =
+            Cmd.OfAsync.either
+                Server.dotnetSecureApi.dotnetGetUser
+                ()
+                (Result.Ok >> DotnetGetUserResponse)
+                (Error >> DotnetGetUserResponse)
+        currentModel, cmd
+    | _, DotnetGetUserResponse (Ok value) ->
         let nextModel = {
             currentModel with
                 Authenticated = true
-                User = {
-                    currentModel.User with
-                        Username =
-                            match value with
-                            | Success x -> x
-                            | _ -> failwith "this should never happen"
-                }
+                User = Some value
+                Loading = false
+        }
+        nextModel,Cmd.none
+    | _, DotnetGetUserResponse (Error e) ->
+        let nextModel = {
+            currentModel with
+                Loading = false
+                ErrorMsg = Some e.Message
+        }
+        nextModel,Cmd.none
+        /// functions to access user-only counter
+    | _, GetUserCounterRequest ->
+        let nextModel = {
+            currentModel with
+                Loading = true
+        }
+        let cmd =
+            Cmd.OfAsync.either
+                Server.dotnetSecureApi.getUserCounter
+                ()
+                (Ok >> GetUserCounterResponse)
+                (Error >> GetUserCounterResponse)
+        nextModel, cmd
+    | _, GetUserCounterResponse (Ok value)->
+        let nextModel = {
+            currentModel with
+                Loading = false
+                Counter = Some value
+        }
+        nextModel, Cmd.none
+    | _, GetUserCounterResponse (Error e)->
+        let nextModel = {
+            currentModel with
+                Loading = false
+                ErrorMsg = Some e.Message
+        }
+        nextModel, Cmd.none
+        /// functions to handle user log out
+    | _, DotnetUserLogOutRequest ->
+        let cmd =
+            Cmd.OfAsync.either
+                Server.dotnetSecureApi.dotnetUserLogOut
+                ()
+                (Ok >> DotnetUserLogOutResponse)
+                (Error >> DotnetUserLogOutResponse)
+        let nextModel = {
+            currentModel with
+                Loading = true
+        }
+        nextModel, cmd
+    | _, DotnetUserLogOutResponse (Ok value) ->
+        init()
+    | _, DotnetUserLogOutResponse (Error e) ->
+        let nextModel = {
+            currentModel with
+                ErrorMsg = Some e.Message
         }
         nextModel, Cmd.none
     | _, Debug (message) ->
@@ -201,8 +290,8 @@ let debug (m:Model) =
 
 let show model =
     match model with
-    | { Counter = Some counter } -> string counter.Value
-    | { Counter = None   } -> "Loading..."
+    | { Counter = Some counter;Loading = false } -> string counter.Value
+    | _ -> "Loading..."
 
 let button txt onClick =
     Button.button
@@ -246,7 +335,7 @@ let loginNavbar (model : Model) (dispatch : Msg -> unit)=
             Navbar.Item.div
               [ ]
               [ Button.a
-                  [ Button.OnClick (fun _ -> dispatch (DotnetLogInRequest model.User)) ]
+                  [ Button.OnClick (fun _ -> dispatch (DotnetLogInRequest model.User.Value)) ]
                   [ str "Login" ]
               ]
         ]
@@ -267,12 +356,12 @@ let loggedInNavbar (model : Model) (dispatch : Msg -> unit) =
                 Navbar.Link.a [ Navbar.Link.IsArrowless ] [
                     Text.span
                         [ Modifiers [ Modifier.TextWeight TextWeight.SemiBold; Modifier.TextColor Color.IsWhiteBis ] ]
-                        [ str model.User.Username ]
+                        [ str (if model.User.IsSome then model.User.Value.Username else "No User Information")]
                 ]
                 Navbar.Dropdown.div [ Navbar.Dropdown.IsRight ] [
-                    //Navbar.divider [ ] [ ]
+                    Navbar.divider [ ] [ ]
                     Navbar.Item.a
-                        [ Navbar.Item.Props [OnClick ( fun _ -> dispatch (Debug "Clicked a button"))] ]
+                        [ Navbar.Item.Props [OnClick ( fun _ -> dispatch DotnetUserLogOutRequest)] ]
                         [ str "Logout" ]
                 ]
             ]
@@ -283,8 +372,7 @@ let loggedInNavbar (model : Model) (dispatch : Msg -> unit) =
 let view (model : Model) (dispatch : Msg -> unit) =
     div []
         [ Navbar.navbar [ Navbar.Color IsPrimary ]
-            //(if model.Token.IsSome then (loggedInNavbar model dispatch) else (loginNavbar model dispatch ))
-            (loginNavbar model dispatch)
+            (if model.Authenticated = true then (loggedInNavbar model dispatch) else (loginNavbar model dispatch ))
           br []
           Container.container []
               [ Content.content [ Content.Modifiers [ Modifier.TextAlignment (Screen.All, TextAlignment.Centered) ] ]
@@ -292,7 +380,7 @@ let view (model : Model) (dispatch : Msg -> unit) =
                 Columns.columns []
                     [ Column.column [] [ button "-" (fun _ -> dispatch Decrement) ]
                       Column.column [] [ button "+" (fun _ -> dispatch Increment) ]
-                      Column.column [] [ button "secret" (fun _ -> dispatch (Debug "Clicked a button")) ] ] ]
+                      Column.column [] [ button "secret" (fun _ -> dispatch GetUserCounterRequest) ] ] ]
           Footer.footer [ ]
                 [ Content.content [ Content.Modifiers [ Modifier.TextAlignment (Screen.All, TextAlignment.Centered) ] ]
                     [ safeComponents

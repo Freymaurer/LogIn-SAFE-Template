@@ -23,22 +23,43 @@ let port =
     "SERVER_PORT"
     |> tryGetEnv |> Option.map uint16 |> Option.defaultValue 8085us
 
-let dotnetLogIn user (context: HttpContext) =
-    task {
-        let signInManager = context.GetService<SignInManager<IdentityUser>>()
-        let! result = signInManager.PasswordSignInAsync(user.Username, user.Password, true, false)
-        match result.Succeeded with
-        | true ->
-           return task {
-                let userManager = context.GetService<UserManager<IdentityUser>>()
-                let user = userManager.GetUserAsync context.User
-                return DotnetLogInResults.Success user.Result.UserName
-           } |> fun x -> x.Result
-        | false -> return DotnetLogInResults.Failed (result.ToString())
-    }
+module DotnetModule =
 
-let netCoreApi (context: HttpContext) = {
-        myLogIn = fun (user) -> async { return (dotnetLogIn user context).Result }
+    let dotnetLogIn user (context: HttpContext) =
+        task {
+            let signInManager = context.GetService<SignInManager<IdentityUser>>()
+            let! result = signInManager.PasswordSignInAsync(user.Username, user.Password, true, false)
+            match result.Succeeded with
+            | true ->
+               return DotnetLogInResults.Success (result.ToString())
+            | false -> return DotnetLogInResults.Failed (result.ToString())
+        } |> fun x -> x.Result
+
+    let dotnetGetUser (context: HttpContext) =
+        task {
+            let userManager = context.GetService<UserManager<IdentityUser>>()
+            let! user = userManager.GetUserAsync context.User
+            return { Username = user.UserName; Password = "" }
+        } |> fun x -> x.Result
+
+    let dotnetUserLogOut (context: HttpContext) =
+        task {
+            let signInManager = context.GetService<SignInManager<IdentityUser>>()
+            do! signInManager.SignOutAsync()
+            return DotnetLogOutResults.Success "Log Out Success"
+        } |> fun x -> x.Result
+
+let dotnetApi (context: HttpContext) = {
+    dotnetLogIn = fun (user) -> async { return (DotnetModule.dotnetLogIn user context) }
+}
+
+let nice() =
+    { Value = 69 }
+
+let dotnetSecureApi (context: HttpContext) = {
+    dotnetGetUser = fun () -> async { return (DotnetModule.dotnetGetUser context)}
+    dotnetUserLogOut = fun () -> async { return (DotnetModule.dotnetUserLogOut context) }
+    getUserCounter = fun () -> async { return nice() }
 }
 
 let counterApi = {
@@ -277,10 +298,16 @@ let webApp =
     let dotnetServiceApi =
         Remoting.createApi()
         |> Remoting.withRouteBuilder Route.builder
-        |> Remoting.fromContext netCoreApi
+        |> Remoting.fromContext dotnetApi
         |> Remoting.withDiagnosticsLogger (printfn "%s")
         |> Remoting.buildHttpHandler
-        
+
+    let dotnetSecureApi =
+        Remoting.createApi()
+        |> Remoting.withRouteBuilder Route.builder
+        |> Remoting.fromContext dotnetSecureApi
+        |> Remoting.withDiagnosticsLogger (printfn "%s")
+        |> Remoting.buildHttpHandler
 
     let myPaths =
         router {
@@ -293,15 +320,19 @@ let webApp =
             post "/login" MyGiraffe.loginHandler
         }
 
+    let mustBeLoggedIn : HttpHandler =
+        requiresAuthentication (redirectTo false "/")
+
     router {
         not_found_handler (setStatusCode 404 >=> text "Not Found")
         forward "/mygtest" myPaths
         forward "" dotnetServiceApi
         forward "" userApi
+        forward "" (mustBeLoggedIn >=> dotnetSecureApi)
     }
 
 let app = application {
-    //use_cookies_authentication "lambdafactory.io"
+    use_cookies_authentication ""//"lambdafactory.io"
     use_router webApp
     url ("http://0.0.0.0:" + port.ToString() + "/")
     service_config MyGiraffe.configureServices

@@ -11,6 +11,10 @@ type DotnetLogInResults =
 | Success of string
 | Failed of string
 
+type DotnetLogOutResults =
+| Success of string
+| Failed of string
+
 module Route =
     /// Defines how routes are generated on server and mapped from client
     let builder typeName methodName =
@@ -23,6 +27,12 @@ type ICounterApi = {
     initialCounter : unit -> Async<Counter>
     }
 
-type IDotnetCoreApi = {
-    myLogIn : User -> Async<DotnetLogInResults>
+type IDotnetApi = {
+    dotnetLogIn : User -> Async<DotnetLogInResults>
+}
+
+type IDotnetSecureApi = {
+    dotnetGetUser : unit -> Async<User>
+    dotnetUserLogOut : unit -> Async<DotnetLogOutResults>
+    getUserCounter : unit -> Async<Counter>
 }
