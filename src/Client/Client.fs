@@ -220,6 +220,7 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
                 { currentModel with
                     Loading = false
                     ExtraReactElement = Message x
+                    RegisterModel = {currentModel.RegisterModel with Password = ""}
                 } , Cmd.none
             | RegisterSuccess x ->
                 { currentModel with
@@ -233,6 +234,7 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
                 Loading = false
                 ErrorMsg = Some e.Message
                 ExtraReactElement = Message e.Message
+                RegisterModel = {currentModel.RegisterModel with Password = ""}
         }
         nextModel, Cmd.none
         /// functions to log in user via asp.net
@@ -342,6 +344,26 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
         { currentModel with ErrorMsg = Some message}, Cmd.none
     | _ -> currentModel, Cmd.none
 
+let inputRegisterBox inputElement header valueOrDefault msg =
+    Box.box' [ Props [ Class "registerBox" ] ] [
+        Text.div [ Props [ Style [ PaddingLeft "1rem" ] ] ] [
+            str header
+        ]
+        inputElement [
+            Input.OnChange msg
+                //(fun e ->
+                //    let newModel = {model.RegisterModel with Username = e.Value}
+                //    dispatch (UpdateRegisterModel newModel)
+                //    )
+            Input.ValueOrDefault valueOrDefault
+            Input.Props [
+                Style [
+                    BoxShadow "none"; Border "none";
+                    BackgroundColor "#f2f2f2"
+                ]
+            ]
+        ]
+    ]
 
 let registerModal (model : Model) (dispatch : Msg -> unit) =
     Modal.modal [
@@ -356,50 +378,37 @@ let registerModal (model : Model) (dispatch : Msg -> unit) =
                 Modifiers [Modifier.BackgroundColor IsWhite]
                 Props [ Style [ BorderBottom "0px"] ]
                 ] [
-                Modal.Card.title [ ] [
-                    br []
+                Modal.Card.title [ Props [ Style [ PaddingTop "2rem" ] ] ] [
                     str "Create your account"
                 ]
             ]
             Modal.Card.body
                 [ ] [
-                br []
-                Input.text [
-                    Input.OnChange
-                        (fun e ->
-                            let newModel = {model.RegisterModel with Username = e.Value}
-                            dispatch (UpdateRegisterModel newModel)
-                            )
-                    Input.Placeholder "Username"
-                    Input.ValueOrDefault model.RegisterModel.Username
-                ]
-                br []
-                br []
-                Input.email [
-                    Input.OnChange
-                        (fun e ->
-                            let newModel = {model.RegisterModel with Email = e.Value}
-                            dispatch (UpdateRegisterModel newModel)
-                            )
-                    Input.Placeholder "Email"
-                    Input.ValueOrDefault model.RegisterModel.Email
-                ]
-                br []
-                br []
-                Input.password [
-                    Input.OnChange
-                        (fun e ->
-                            let newModel = {model.RegisterModel with Password = e.Value}
-                            dispatch (UpdateRegisterModel newModel)
-                            )
-                    Input.Placeholder "Password"
-                    Input.ValueOrDefault model.RegisterModel.Password
-                ]
-                br []
-                br []
-                br []
-                br []
-                Columns.columns [][
+                inputRegisterBox
+                    Input.text
+                    "Username"
+                    model.RegisterModel.Username
+                    (fun e ->
+                        let newModel = {model.RegisterModel with Username = e.Value}
+                        dispatch (UpdateRegisterModel newModel)
+                        )
+                inputRegisterBox
+                    Input.email
+                    "Email"
+                    model.RegisterModel.Email
+                    (fun e ->
+                        let newModel = {model.RegisterModel with Email = e.Value}
+                        dispatch (UpdateRegisterModel newModel)
+                        )
+                inputRegisterBox
+                    Input.password
+                    "Password"
+                    model.RegisterModel.Password
+                    (fun e ->
+                        let newModel = {model.RegisterModel with Password = e.Value}
+                        dispatch (UpdateRegisterModel newModel)
+                        )
+                Columns.columns [ Columns.Props [ Style [ PaddingTop "2rem" ] ] ][
                     Column.column [Column.Offset (Screen.All,Column.IsThreeFifths)] [
                         Button.button [
                             Button.Color IsInfo
@@ -413,7 +422,6 @@ let registerModal (model : Model) (dispatch : Msg -> unit) =
                 ]
             ] 
         ]
-
 
 let safeComponents =
     let components =
@@ -601,8 +609,8 @@ let view (model : Model) (dispatch : Msg -> unit) =
           Footer.footer [ ]
                 [ Content.content [ Content.Modifiers [ Modifier.TextAlignment (Screen.All, TextAlignment.Centered) ] ]
                     [ safeComponents
-                      br []
-                      str (debug model) ] ] ]
+                      //br []
+                      (*str (debug model) *)] ] ]
 
 #if DEBUG
 open Elmish.Debug
