@@ -260,8 +260,8 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
     | _ , DotnetLoginResponse (Result.Ok value) ->
         let (message,cmd) =
             match value with
-            | LoginSuccess _ -> "Log In Succeded", Cmd.ofMsg DotnetGetUserRequest
-            | LoginFail _ -> "Log In Failed", Cmd.ofMsg (UpdateExtraElement (Message "Log In Failed"))
+            | LoginSuccess msg -> msg, Cmd.ofMsg DotnetGetUserRequest
+            | LoginFail msg -> msg, Cmd.ofMsg (UpdateExtraElement (Message "Log In Failed"))
         let nextModel = {
             currentModel with
                 ErrorMsg = Some message
@@ -280,6 +280,7 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
     | _, DotnetGetUserResponse (Ok value) ->
         let nextModel = {
             currentModel with
+                ExtraReactElement = Message "Getting User Information was successful"
                 Authenticated = true
                 User = Some value
                 Loading = false
@@ -288,6 +289,7 @@ let update (msg : Msg) (currentModel : Model) : Model * Cmd<Msg> =
     | _, DotnetGetUserResponse (Error e) ->
         let nextModel = {
             currentModel with
+                ExtraReactElement = Message "Getting User Information failed"
                 Loading = false
                 ErrorMsg = Some e.Message
         }
@@ -439,7 +441,6 @@ let safeComponents =
              a [ Href "https://fulma.github.io/Fulma" ] [ str "Fulma" ]
              str ", "
              a [ Href "https://zaid-ajaj.github.io/Fable.Remoting/" ] [ str "Fable.Remoting" ]
-
            ]
 
     span [ ]
@@ -466,30 +467,29 @@ let button txt onClick =
         [ str txt ]
 
 let loginNavbar (model : Model) (dispatch : Msg -> unit) = [
-    Navbar.Item.div
-        [ ]
-        [ Heading.h2 [ ]
-            [ str "SAFE Template - Login" ] ]
-    Navbar.End.a [ ] [
-        Navbar.Item.div [
+    Navbar.Item.div [ ] [ 
+        Heading.h2 [ ] [ str "SAFE Template - Login" ]
+    ]
+    Navbar.End.div [ ] [
+        Navbar.Item.a [
             Navbar.Item.IsHoverable;
             Navbar.Item.HasDropdown;
+            Navbar.Item.Props [Style [MarginRight "2rem"] ]
         ] [
             Navbar.Link.a [ ] [
-                Text.span
+                Text.div
                     [ Modifiers [ Modifier.TextWeight TextWeight.SemiBold; Modifier.TextColor Color.IsWhiteBis ] ]
                     [ str "Log In"]
             ]
-            Navbar.Dropdown.a [
+            Navbar.Dropdown.div [
                 Navbar.Dropdown.IsRight
                 Navbar.Dropdown.Props [ Style [ Width "15rem" ] ]
                 ] [
                 Navbar.Item.div
                     [ Navbar.Item.Props [Style [Cursor "text"]];Navbar.Item.Modifiers [Modifier.TextColor IsGrey] ]
                     [ str "Have an account?" ]
-                Navbar.Item.div
-                    [ ]
-                    [ Input.text
+                Navbar.Item.div [ ] [
+                    Input.text
                         [ Input.OnChange (
                             fun e ->
                                 //let newUser = { model.User with Username = e.Value}
@@ -499,9 +499,8 @@ let loginNavbar (model : Model) (dispatch : Msg -> unit) = [
                           Input.Props [ Id "UserName" ]
                             ]
                     ]
-                Navbar.Item.div
-                    [ ]
-                    [ Input.password
+                Navbar.Item.div [ ][
+                    Input.password
                         [ Input.OnChange (
                             fun e ->
                                 //let newUser = { model.User with Password = e.Value}
@@ -511,20 +510,19 @@ let loginNavbar (model : Model) (dispatch : Msg -> unit) = [
                           Input.Props [ Id "UserPw" ]
                             ]
                     ]
-                Navbar.Item.a
-                    [
-                        Navbar.Item.Props [
-                            OnClick (fun _ -> dispatch (DotnetLoginRequest model.LoginModel));
-                            Style [
-                                PaddingLeft "5%" ; PaddingRight "5%";
-                                AlignContent AlignContentOptions.Center;
-                                BorderRadius "10px"
-                                MarginLeft "5%"; MarginRight "5%"; MarginTop "3%"
-                            ]
+                Navbar.Item.a [
+                    Navbar.Item.Props [
+                        OnClick (fun _ -> dispatch (DotnetLoginRequest model.LoginModel));
+                        Style [
+                            PaddingLeft "5%" ; PaddingRight "5%";
+                            AlignContent AlignContentOptions.Center;
+                            BorderRadius "10px"
+                            MarginLeft "5%"; MarginRight "5%"; MarginTop "3%"
                         ]
-                        Navbar.Item.Modifiers [ Modifier.BackgroundColor IsInfo; Modifier.TextColor IsWhite ]
                     ]
-                    [ Text.p
+                    Navbar.Item.Modifiers [ Modifier.BackgroundColor IsInfo; Modifier.TextColor IsWhite ]
+                    ] [
+                    Text.p
                         [ Modifiers [ Modifier.TextAlignment (Screen.All,TextAlignment.Centered) ]; Props [ Style [ TextAlign TextAlignOptions.Center; Width "90%" ] ] ]
                         [ str "Login" ]
                     ]
@@ -532,29 +530,27 @@ let loginNavbar (model : Model) (dispatch : Msg -> unit) = [
                 Navbar.Item.div
                     [ Navbar.Item.Props [Style [Cursor "text"]];Navbar.Item.Modifiers [Modifier.TextColor IsGrey] ]
                     [ str "New here?" ]
-                Navbar.Item.a
-                    [
-                        Navbar.Item.Props [
-                            OnClick (fun _ -> dispatch (UpdateExtraElement RegisterModal));
-                            Style [
-                                PaddingLeft "5%" ; PaddingRight "5%";
-                                AlignContent AlignContentOptions.Center;
-                                BorderRadius "10px"
-                                MarginLeft "5%"; MarginRight "5%"; MarginTop "3%"; MarginBottom "7%"
-                                Border @"1px solid hsl(204, 86%, 53%)"
-                            ]
+                Navbar.Item.a [
+                    Navbar.Item.Props [
+                        OnClick (fun _ -> dispatch (UpdateExtraElement RegisterModal));
+                        Style [
+                            PaddingLeft "5%" ; PaddingRight "5%";
+                            AlignContent AlignContentOptions.Center;
+                            BorderRadius "10px"
+                            MarginLeft "5%"; MarginRight "5%"; MarginTop "3%"; MarginBottom "7%"
+                            Border @"1px solid hsl(204, 86%, 53%)"
                         ]
-                        Navbar.Item.Modifiers [Modifier.TextColor IsInfo ]
                     ]
-                    [ Text.p [
+                    Navbar.Item.Modifiers [Modifier.TextColor IsInfo ]
+                    ] [ 
+                    Text.p [
                         Modifiers [ Modifier.TextAlignment (Screen.All,TextAlignment.Centered) ];
                         Props [ Style [ TextAlign TextAlignOptions.Center; Width "90%" ] ]
                         ]
                         [ str "Sign Up" ]
                     ]
-            ]
+                ]
         ]
-        Navbar.Item.div [] [br []]
     ]
     ]
 
@@ -586,8 +582,6 @@ let loggedInNavbar (model : Model) (dispatch : Msg -> unit) =
         ]
     ]
 
-
-
 let view (model : Model) (dispatch : Msg -> unit) =
     let extraEle =
         match model.ExtraReactElement with
@@ -606,11 +600,10 @@ let view (model : Model) (dispatch : Msg -> unit) =
                     [ Column.column [] [ button "-" (fun _ -> dispatch Decrement) ]
                       Column.column [] [ button "+" (fun _ -> dispatch Increment) ]
                       Column.column [] [ button "secret" (fun _ -> dispatch GetUserCounterRequest) ] ] ]
+          str (Browser.Dom.document.cookie)
           Footer.footer [ ]
                 [ Content.content [ Content.Modifiers [ Modifier.TextAlignment (Screen.All, TextAlignment.Centered) ] ]
-                    [ safeComponents
-                      //br []
-                      (*str (debug model) *)] ] ]
+                    [ safeComponents ] ] ]
 
 #if DEBUG
 open Elmish.Debug
