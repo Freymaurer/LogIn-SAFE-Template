@@ -1,6 +1,6 @@
-# DISCLAIMER
+# ARCHIVED
 
-Until this is updated one can find an updated, altough slightly more complex, version [here](https://github.com/Freymaurer/UserManagement).
+Please check out a more up to date exmaple [here](https://github.com/Freymaurer/UserManagement).
 
 # SAFE Template
 
